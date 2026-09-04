@@ -1,0 +1,23 @@
+--
+-- mod-sanctuary-stash - the first strongbox key is retired
+--
+-- 990006 was the single key this module shipped with, before the palette of fifteen. It
+-- never worked: `.additem 990006` puts nothing usable in a bag, because the entry has no row
+-- in the client's Item.dbc. Its item_template row is identical in every respect to a key
+-- that does work - same class, flags, stack, display - so nothing in the database explains
+-- it, and nothing in the database could have fixed it. It was simply never added to ITEMS
+-- in make-patch.py, and the client cannot draw an entry it has never heard of.
+--
+-- Rather than ship it a row now, it goes: 990020-990034 replaced it, and leaving it would
+-- keep two problems alive. It duplicated the name "Strongbox Key" that 990031 now carries,
+-- and it wore INV_Misc_Key_08 - the icon 990027 is now called Frostbound Key for.
+--
+-- Safe because no strongbox names it. `sanctuary_stash`.`keyitem` is where a box records its
+-- key, and that table is empty on all four databases: no box has been placed yet.
+--
+-- The instructions in 2026_09_03_00_sanctuary_stash.sql still say `.additem 990006` and set
+-- @STASH_KEY to it. That file is already applied and is left alone rather than rewritten
+-- under its own hash; read this one instead. Any of 990020-990034 does what it described.
+--
+
+DELETE FROM `item_template` WHERE `entry` = 990006;

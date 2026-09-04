@@ -1156,9 +1156,19 @@ public:
         if (!player || !player->GetSession())
             return true;
 
-        // Without an error the client leaves the item greyed out and the player reads it as
-        // a cooldown rather than an answer.
-        player->SendEquipError(EQUIP_ERR_CANT_DO_RIGHT_NOW, item, nullptr);
+        /*
+         * Clears the item, silently.
+         *
+         * Something has to answer the use or the client leaves the key greyed out and the
+         * player reads it as a cooldown rather than an answer. This used to send
+         * EQUIP_ERR_CANT_DO_RIGHT_NOW, which cleared it but printed "You can't do that right
+         * now" over a key that had just worked perfectly well.
+         *
+         * EQUIP_ERR_OK is the same packet with the error byte zero: Player::SendEquipError
+         * writes only the result and returns before the item guids, so the client takes it as
+         * the use having concluded and prints nothing. The answer is the line below it.
+         */
+        player->SendEquipError(EQUIP_ERR_OK, item, nullptr);
 
         ChatHandler handler(player->GetSession());
 

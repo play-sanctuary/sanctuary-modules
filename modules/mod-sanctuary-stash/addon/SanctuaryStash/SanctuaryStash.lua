@@ -553,22 +553,27 @@ end
 
 -- entry, icon, name. One per INV_Misc_Key the client carries; they are a fixed palette
 -- because item entries cannot be created while the server runs.
+--
+-- The names must match item_template, and they are named after what the icon actually
+-- shows rather than its number - the two drifted apart once already, which is how a
+-- purple key came to be called Brass. If a name changes there, change it here too:
+-- this table is what the game master panel labels its buttons with.
 local KEYS = {
-    { 990020, "INV_Misc_Key_01", "Iron Key" },
-    { 990021, "INV_Misc_Key_02", "Brass Key" },
-    { 990022, "INV_Misc_Key_03", "Rusted Key" },
-    { 990023, "INV_Misc_Key_04", "Bone Key" },
-    { 990024, "INV_Misc_Key_05", "Silver Key" },
-    { 990025, "INV_Misc_Key_06", "Ornate Key" },
-    { 990026, "INV_Misc_Key_07", "Crooked Key" },
-    { 990027, "INV_Misc_Key_08", "Strongbox Key" },
-    { 990028, "INV_Misc_Key_09", "Gilded Key" },
-    { 990029, "INV_Misc_Key_10", "Blackened Key" },
+    { 990020, "INV_Misc_Key_01", "Ruby Key" },
+    { 990021, "INV_Misc_Key_02", "Amethyst Key" },
+    { 990022, "INV_Misc_Key_03", "Quartz Key" },
+    { 990023, "INV_Misc_Key_04", "Topaz Key" },
+    { 990024, "INV_Misc_Key_05", "Brass Key" },
+    { 990025, "INV_Misc_Key_06", "Iron Key" },
+    { 990026, "INV_Misc_Key_07", "Fine Key" },
+    { 990027, "INV_Misc_Key_08", "Frostbound Key" },
+    { 990028, "INV_Misc_Key_09", "Curved Key" },
+    { 990029, "INV_Misc_Key_10", "Shell Key" },
     { 990030, "INV_Misc_Key_11", "Skeleton Key" },
-    { 990031, "INV_Misc_Key_12", "Glass Key" },
-    { 990032, "INV_Misc_Key_13", "Rune-cut Key" },
-    { 990033, "INV_Misc_Key_14", "Tarnished Key" },
-    { 990034, "INV_Misc_Key_15", "Frostbound Key" },
+    { 990031, "INV_Misc_Key_12", "Strongbox Key" },
+    { 990032, "INV_Misc_Key_13", "Grim Key" },
+    { 990033, "INV_Misc_Key_14", "Silver Key" },
+    { 990034, "INV_Misc_Key_15", "Rune-cut Key" },
 }
 
 local KEY_COLS = 8
