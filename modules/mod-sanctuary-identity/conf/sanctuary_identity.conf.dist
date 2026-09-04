@@ -1,0 +1,84 @@
+[worldserver]
+
+########################################
+# mod-sanctuary-identity
+#
+# Players are strangers until they introduce themselves. A stranger reads as an alias -
+# "Hooded Orc" - everywhere their name would otherwise appear, including the name drawn over
+# their head, which is the one surface no addon can reach.
+#
+# Aliases are allocated once per character and kept in `character_aliases`, so the Hooded Orc
+# is the same person tomorrow. They are unique, which matters more than it looks: two
+# strangers sharing a name would be indistinguishable to the voice speaking indicator, which
+# can only match a nameplate by its text.
+########################################
+
+#    SanctuaryIdentity.Enable
+#        Description: Master switch. With this off everyone is treated as known, so all names
+#                     appear normally and nothing is disguised.
+#        Default:     1
+
+SanctuaryIdentity.Enable = 1
+
+#    SanctuaryIdentity.Addon.Prefix
+#        Description: Addon message prefix. Changing it means changing the addon to match.
+#        Default:     "SVID"
+
+SanctuaryIdentity.Addon.Prefix = "SVID"
+
+#    SanctuaryIdentity.MaxQueriesPerSecond
+#        Description: Per-session cap on name questions from the addon. A client walking into a
+#                     crowd asks about everyone at once, so this is a flood guard rather than a
+#                     normal limit.
+#        Default:     20
+
+SanctuaryIdentity.MaxQueriesPerSecond = 20
+
+#    SanctuaryIdentity.DisguiseNames
+#        Description: Answer the client's name query with the alias, so a stranger's real name
+#                     never reaches the client at all.
+#
+#                     This is what covers the name drawn over a character's head. That text is
+#                     drawn by the client from its own name cache, unconditionally - no CVar
+#                     governs it and no addon can rewrite it - so the only way it reads
+#                     anything but the truth is for the truth never to have been sent.
+#
+#                     Turning this off leaves the other surfaces to the addon but puts the real
+#                     name back over everyone's head, which defeats the point. It exists as an
+#                     escape hatch if the disguise ever interacts badly with something.
+#        Default:     1
+
+SanctuaryIdentity.DisguiseNames = 1
+
+#
+#    SanctuaryIdentity.GameMastersSeeNames
+#        Description: A game master with GM mode on (.gm on) sees everyone's real name,
+#                     without needing an introduction.
+#
+#                     It is GM mode rather than account rank on purpose: with .gm off a
+#                     game master meets strangers like anybody else, so they can play the
+#                     realm as it is meant to be played and turn this on only to moderate.
+#
+#                     Only the viewer's mode matters. A game master being looked at is
+#                     disguised like anyone else.
+#        Default:     1
+#
+
+SanctuaryIdentity.GameMastersSeeNames = 1
+
+#
+#    SanctuaryIdentity.Disguise.Enable
+#        Description: Lets players use `.disguise` to hide behind a second alias, including
+#                     from people they have already been introduced to. Their introductions
+#                     are kept, so taking the disguise off restores exactly who knew them.
+#                     A game master with .gm on still sees through it.
+#
+#                     Note the one limitation: the name floating above a character's head is
+#                     resolved by each client when it creates the unit, so anybody already
+#                     stood nearby keeps seeing the previous name until they move out of
+#                     range or change zone. Every other surface changes immediately, and the
+#                     player is told this when they put a disguise on.
+#        Default:     1
+#
+
+SanctuaryIdentity.Disguise.Enable = 1

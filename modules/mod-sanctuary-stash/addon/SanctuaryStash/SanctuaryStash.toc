@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Sanctuary Strongbox
+## Notes: The window for shared strongboxes. Click a slot to take; click a bag item to put.
+## Author: Sanctuary
+## Version: 1.0
+## SavedVariables: SanctuaryStashDB
+
+SanctuaryStash.lua

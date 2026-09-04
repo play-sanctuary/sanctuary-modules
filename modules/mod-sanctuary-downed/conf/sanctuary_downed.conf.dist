@@ -1,0 +1,223 @@
+[worldserver]
+
+#
+#    SanctuaryDowned.Enable
+#        Description: Lifting a fallen player onto your shoulder and carrying them.
+#        Default:     1
+#
+
+SanctuaryDowned.Enable = 1
+
+#
+#    SanctuaryDowned.Carry.VehicleId
+#        Description: The vehicle the carrier is given. 305 is the stock entry whose seat
+#                     2644 attaches at the right shoulder, loops the "Drowned" animation so
+#                     the passenger hangs limp, and omits CAN_ENTER_OR_EXIT, CAN_CONTROL,
+#                     CAN_ATTACK and CAN_CAST - so the client itself keeps them helpless.
+#                     Changing this without checking those seat flags will produce a
+#                     passenger who can sit up, act, or climb off.
+#        Default:     284
+#
+
+SanctuaryDowned.Carry.VehicleId = 284
+
+#
+#    SanctuaryDowned.Carry.SeatId
+#        Description: Which seat of that vehicle to use. 305 has only one.
+#        Default:     0
+#
+
+SanctuaryDowned.Carry.SeatId = 0
+
+#
+#    SanctuaryDowned.Carry.Reach
+#        Description: How close you must be to lift somebody, in yards. Measured with
+#                     bounding radii, so this means "stood over them" rather than "nearby".
+#        Default:     0.5
+#
+
+SanctuaryDowned.Carry.Reach = 0.5
+
+#
+#    SanctuaryDowned.Carry.SpeedFactor
+#        Description: Run speed while carrying, as a fraction of normal. Carrying somebody
+#                     should cost something, or there is no decision in whether to.
+#        Default:     0.7
+#
+
+SanctuaryDowned.Carry.SpeedFactor = 0.7
+
+#
+#    SanctuaryDowned.Announce
+#        Description: Tell both parties when somebody is picked up or set down.
+#        Default:     1
+#
+
+SanctuaryDowned.Announce = 1
+
+#
+#    SanctuaryDowned.Downed.Enable
+#        A killing blow leaves the player at 1 HP, rooted and prone, instead of killing
+#        them. They stay technically alive because that is the only way they can be picked
+#        up - the core refuses to seat a dead unit in a vehicle.
+#
+SanctuaryDowned.Downed.Enable = 1
+
+#
+#    SanctuaryDowned.Downed.FromPlayers
+#    SanctuaryDowned.Downed.FromCreatures
+#        Which killing blows are survivable. Both, so that a wolf on the road leaves you
+#        needing help rather than dead - the same scene either way. Environmental damage
+#        (falling, drowning, lava) counts as "not a player" and follows the second key.
+#
+SanctuaryDowned.Downed.FromPlayers = 1
+SanctuaryDowned.Downed.FromCreatures = 1
+
+#
+#    SanctuaryDowned.Downed.BleedOutSeconds
+#        How long they have before it becomes a real death. The clock STOPS while somebody
+#        is carrying them, which is the point of carrying them.
+#
+SanctuaryDowned.Downed.BleedOutSeconds = 600
+
+#
+#    SanctuaryDowned.Downed.ReviveHealthPct
+#        Health a rescue restores. Nothing brings them round by healing them any more -
+#        being incapacitated should mean it - so this is what they wake up on rather than a
+#        threshold. Standing up on the 1 HP they were left with would be a formality before
+#        dying again.
+#
+SanctuaryDowned.Downed.ReviveHealthPct = 15
+
+#
+#    SanctuaryDowned.Downed.ImmunitySeconds
+#        A few seconds after going down where nothing can touch them at all. Damage is
+#        already clamped to zero for the whole downed state, so this is not about damage -
+#        it stops the things a clamp cannot: a knockback moving the body, a fresh snare, an
+#        area effect on the ground re-applying itself. Every hostile aura is stripped at the
+#        same moment.
+#
+SanctuaryDowned.Downed.ImmunitySeconds = 5
+
+#
+#    SanctuaryDowned.Downed.NeutralFaction
+#        The faction a downed player wears once the grace expires. 2300 is the template the
+#        lawman module already ships for wanted outlaws: neutral to every playable race in
+#        both directions, and still attackable. So nothing sweeps them up by accident, and
+#        finishing them off means somebody deliberately picking them out again. 0 leaves
+#        them on their own faction.
+#
+SanctuaryDowned.Downed.NeutralFaction = 2300
+
+
+
+#
+#    SanctuaryDowned.Downed.ImmunitySpell
+#        The debuff worn while the grace lasts, so the player can see how long they are safe
+#        rather than counting. Inert - the immunity is unit flags, this is the label on them.
+#        Its duration is overwritten from ImmunitySeconds above. 0 disables it.
+#
+SanctuaryDowned.Downed.ImmunitySpell = 81002
+
+#
+#    SanctuaryDowned.Downed.BleedOutSpell
+#        The countdown worn while down. Also what the SanctuaryDowned addon watches to know
+#        when to offer the "stop holding on" button, so the popup needs no addon channel and
+#        cannot disagree with the clock. Duration follows BleedOutSeconds, and is re-synced
+#        whenever a carry pauses it. 0 disables both the icon and the button.
+#
+SanctuaryDowned.Downed.BleedOutSpell = 81003
+
+#
+#    SanctuaryDowned.Downed.ReviveSpell
+#    SanctuaryDowned.Downed.ReviveSpellClasses
+#        "Resuscitate" - a five second cast at thirty yards that brings a downed player
+#        round, and the classes taught it at login. 2 paladin, 5 priest, 7 shaman, 11 druid:
+#        the four that already have a resurrection, on the reasoning that anyone who can
+#        raise the dead can rouse the merely unconscious.
+#
+#        This exists because the retail resurrection spells could not be made to work. The
+#        client refuses to aim one at a living target and decides that before sending
+#        anything, so no server-side hook can reach it. A spell we own has no such problem.
+#
+SanctuaryDowned.Downed.ReviveSpell = 81004
+SanctuaryDowned.Downed.ReviveSpellClasses = 2,5,7,11
+
+#
+#    SanctuaryDowned.Downed.HearthdownSpell
+#    SanctuaryDowned.Downed.HearthdownItem
+#        What Hearthdown casts, and the item spent when it lands. Ten seconds against
+#        Resuscitate's five - fumbling a vial out of a bag is not the same as knowing what
+#        you are doing. The vial is only consumed on success.
+#
+SanctuaryDowned.Downed.HearthdownSpell = 81005
+SanctuaryDowned.Downed.HearthdownItem = 990004
+
+#
+#    SanctuaryDowned.Downed.ReviveRange
+#        How close either revive has to be. The spells themselves carry two yards, which is
+#        the shortest range the client offers; this is the distance that actually decides,
+#        measured with bounding radii so it means "stood over them".
+#
+SanctuaryDowned.Downed.ReviveRange = 0.5
+
+
+
+
+
+#
+#    SanctuaryDowned.Carry.CastSpell
+#        Description: The spell whose cast bar the lift waits on. 56992 is a stock spell
+#                     named "Unused" - nothing in the game casts it, so reshaping it costs
+#                     nothing, and its cast time is already 3000 ms. The module rewrites its
+#                     effect, channel bits and interrupt flags at load, so it does nothing
+#                     but hold a bar that movement cancels. 0 lifts instantly.
+#        Default:     56992
+#
+
+SanctuaryDowned.Carry.CastSpell = 81006
+
+#
+#    SanctuaryDowned.Carry.CarriedSpell
+#        Worn by whoever is over the shoulder. Inert - the carry is a vehicle seat - but it
+#        is what the addon watches to offer the struggle button, and it is the only thing
+#        telling a conscious captive what has happened to them.
+#
+SanctuaryDowned.Carry.CarriedSpell = 81007
+
+
+#
+#    SanctuaryDowned.Carry.CarrierEmote
+#        Description: Looping emote held by the carrier, which is the only way to keep a
+#                     player in a pose. The client resolves the animation from the emote's
+#                     own Emotes.dbc row, so the choice is limited to poses some emote
+#                     already points at: 428 STATE_LOOT (LootHold), 422
+#                     STATE_SPELLEFFECT_HOLD (Hold), 386 STATE_HOLD_THROWN. The animation
+#                     that actually looks like a log over the shoulder is Carry2H (502) and
+#                     no emote points at it - that one needs a client patch. 0 for none.
+#        Default:     428
+#
+
+SanctuaryDowned.Carry.CarrierEmote = 990
+
+#
+#    SanctuaryDowned.Carry.VehicleId.<Race>
+#        Description: Per-race override of the vehicle, and therefore of the seat offsets.
+#                     Keyed on the race of the person being CARRIED: the offsets decide how
+#                     far the body hangs below the shoulder bone, and a taller body needs to
+#                     drop further. The carrier's own height is already handled, because the
+#                     seat attaches to a bone on their skeleton.
+#
+#                     Offsets live in the client's VehicleSeat.dbc and cannot be set from
+#                     the server, so tuning means pointing a race at a different seat.
+#                     Stock shoulder seats: 284 (1.80,-0.50,-2.50), 99 (1.25,0.00,-2.00),
+#                     305 (0.00,0.00,-0.25). 0 uses the default above.
+#        Default:     all 0
+#
+
+#    One seat for every carrier: the offsets are world units measured from the
+#    carrier's own shoulder bone, so carrier size does not change them. The per-race
+#    keys stay available for a race that turns out to need its own trim.
+SanctuaryDowned.Carry.VehicleId = 990
+
+SanctuaryDowned.Carry.MountedVehicleId = 0

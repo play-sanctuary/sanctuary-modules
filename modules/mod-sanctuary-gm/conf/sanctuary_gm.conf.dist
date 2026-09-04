@@ -1,0 +1,60 @@
+[worldserver]
+
+#
+#    SanctuaryGM.Enable
+#        Description: The in-game game master panel and its server-side backing.
+#        Default:     1
+#
+
+SanctuaryGM.Enable = 1
+
+#
+#    SanctuaryGM.RequiredSecurity
+#        Description: Account security needed to use the panel, re-checked on every
+#                     request. 0 player, 1 moderator, 2 game master, 3 administrator.
+#                     The addon is only a convenience: anyone can send the same messages
+#                     by hand, and this is what stops them mattering.
+#        Default:     2
+#
+
+SanctuaryGM.RequiredSecurity = 2
+
+#
+#    SanctuaryGM.SearchLimit
+#        Description: Rows returned per search. Each row is one addon message, so a large
+#                     limit is a burst of traffic to that one client.
+#        Default:     25
+#
+
+SanctuaryGM.SearchLimit = 25
+
+#
+#    SanctuaryGM.MaxSpawnsPerMinute
+#        Description: Ceiling on spawns from one game master, to bound the damage of a
+#                     stuck key or a runaway macro.
+#        Default:     60
+#
+
+SanctuaryGM.MaxSpawnsPerMinute = 60
+
+#
+#    SanctuaryGM.Addon.Prefix
+#        Description: Addon message prefix. Must match the addon.
+#        Default:     "SGM"
+#
+
+SanctuaryGM.Addon.Prefix = "SGM"
+
+#
+#    SanctuaryGM.Sound.DefaultRadius
+#        Description: Radius, in yards, used when the panel plays a sound to an area and
+#                     does not name one of its own.
+#
+#                     Whatever is asked for is capped at the realm's visibility distance
+#                     (Visibility.Distance.Continents, 100 by default). Sound is delivered
+#                     only to players the server is already showing you, so a larger radius
+#                     would reach no further while appearing to promise it did.
+#        Default:     40.0
+#
+
+SanctuaryGM.Sound.DefaultRadius = 40.0

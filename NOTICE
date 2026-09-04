@@ -1,0 +1,60 @@
+Sanctuary — AzerothCore modules
+Copyright (C) 2026 The Sanctuary Project
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU Affero General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+
+The full licence text is in the file LICENSE.
+
+
+-------------------------------------------------------------------------------
+UPSTREAM ATTRIBUTION
+-------------------------------------------------------------------------------
+
+The modules in this repository are additions to, and derivative works of,
+AzerothCore. They do not function without it.
+
+  AzerothCore
+  Copyright (C) 2016-2026 AzerothCore
+  https://github.com/azerothcore/azerothcore-wotlk
+  https://www.azerothcore.org
+  Licensed under the GNU Affero General Public License v3.0.
+  See the AUTHORS file in the AzerothCore repository for copyright information.
+
+AzerothCore is itself derived from earlier open-source projects, whose work is
+present throughout the code these modules build on:
+
+  TrinityCore
+  Copyright (C) 2008-2026 TrinityCore
+  https://github.com/TrinityCore/TrinityCore
+  Licensed under the GNU Affero General Public License v3.0.
+
+  MaNGOS
+  Copyright (C) 2005-2026 MaNGOS
+  https://github.com/mangos
+  Licensed under the GNU General Public License v2.0 or later.
+
+The copy of the GNU Affero General Public License v3.0 distributed here as LICENSE
+is verbatim, and was taken from the AzerothCore source tree.
+
+
+-------------------------------------------------------------------------------
+TRADEMARKS AND GAME CONTENT
+-------------------------------------------------------------------------------
+
+World of Warcraft and Blizzard Entertainment are trademarks or registered
+trademarks of Blizzard Entertainment, Inc. in the U.S. and/or other countries.
+This project is not affiliated with, endorsed by, or sponsored by Blizzard
+Entertainment.
+
+No Blizzard game client files, game data, artwork, audio, or other copyrighted
+game content is included in this repository. The SQL files here reference game
+data by numeric ID only; they do not reproduce it.

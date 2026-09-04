@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Sanctuary Outlaw
+## Notes: One button on the minimap that declares you open to violence.
+## Author: Sanctuary
+## Version: 1.4
+## SavedVariablesPerCharacter: SanctuaryOutlawDB
+
+SanctuaryOutlaw.lua

@@ -1,0 +1,21 @@
+--
+-- mod-sanctuary-lawman - the shackling cast borrows the skinner's animation
+--
+-- WHY: the previous migration gave 81001 SpellVisual 395, the blacksmithing craft, on the
+-- reasoning that irons are metalwork. That reasoning was about the subject matter rather
+-- than about the animation, which is the only part anyone sees.
+--
+-- What matters is the shape of the movement, not the trade it belongs to:
+--
+--   * the smith hammers an object held in front of them - working on a thing they carry
+--   * the enchanter works at the air in front of them - making something out of nothing
+--   * the skinner crouches over a body at arm's length - doing something TO somebody
+--
+-- Only the third looks like fitting irons to a person, so 1008 it is: the visual belonging
+-- to spell 8613 "Skinning", which is what the client plays when a body is being worked on
+-- where it lies.
+--
+-- The client's copy is in patch-enUS-4.MPQ and has to be reinstalled alongside this.
+--
+
+UPDATE `spell_dbc` SET `SpellVisualID_1` = 1008 WHERE `ID` = 81001;

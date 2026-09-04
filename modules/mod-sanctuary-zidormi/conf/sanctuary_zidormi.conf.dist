@@ -1,0 +1,45 @@
+[worldserver]
+
+#
+#    SanctuaryZidormi.Enable
+#        Description: Zidormi's dialogue for moving between the memory of the past and the
+#                     present day. Off leaves her standing there with whatever gossip her
+#                     spawn otherwise has, and changes nobody's phase.
+#        Default:     1
+#
+
+SanctuaryZidormi.Enable = 1
+
+#
+#    SanctuaryZidormi.PastPhase
+#        Description: The phase mask "show me this land as it was" sets. 1 is the default
+#                     phase every character and every spawn starts in, so the past is the
+#                     baseline world.
+#        Default:     1
+#
+
+SanctuaryZidormi.PastPhase = 1
+
+#
+#    SanctuaryZidormi.PresentPhase
+#        Description: The phase mask "return me to the present day" sets. 4294967295 is
+#                     every phase at once, so the present is the baseline world plus
+#                     anything spawned into another phase.
+#
+#                     Because it sees every phase, nothing can be hidden from it. If you
+#                     ever want content that exists only in the past, give the present its
+#                     own bit instead - 2, say - and move the present-day spawns to it.
+#        Default:     4294967295
+#
+
+SanctuaryZidormi.PresentPhase = 4294967295
+
+#
+#    SanctuaryZidormi.Remember
+#        Description: Put players back in the phase they chose when they log in again.
+#                     A phase is not stored on the character by the core, so with this off
+#                     every logout quietly returns them to the default phase.
+#        Default:     1
+#
+
+SanctuaryZidormi.Remember = 1

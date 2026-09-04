@@ -1,0 +1,342 @@
+[worldserver]
+
+########################################
+# mod-sanctuary-lawman
+#
+# The other half of outlawry. A game master appoints a character with
+# `.lawman set <player>`; that character goes on duty with `.lawman on` or the addon
+# button, wears their city's tabard, and carries a Writ of Accusation.
+#
+# Using the writ on somebody makes THEM an outlaw for a fixed sentence. That is the point
+# of the module: outlawry only ever covered people who declared themselves, so a criminal
+# could switch the mode off and walk away from whatever they had just done. Because the
+# sentence has an expiry, mod-sanctuary-outlaw refuses to let them stand down from it.
+#
+# A lawman is given no combat flags at all, and that is deliberate. Anyone can already
+# strike an outlaw - the outlaw carries a hostile faction, so every client renders them
+# attackable. Withholding the faction override and UNIT_FLAG2_IGNORE_REPUTATION is exactly
+# what keeps the guards of a lawman's own city friendly to them.
+#
+########################################
+
+#
+#    SanctuaryLawman.Enable
+#        Description: Whether the watch exists on this realm at all.
+#        Default:     1
+#
+
+SanctuaryLawman.Enable = 1
+
+#
+#    SanctuaryLawman.Title.Alliance
+#    SanctuaryLawman.Title.Horde
+#        Description: What the office is called on each side. Purely cosmetic, and chosen
+#                     by the character's RACIAL side rather than their current faction, so
+#                     a faction override cannot flip somebody's title mid-sentence.
+#        Default:     "Guard" / "Grunt"
+#
+
+SanctuaryLawman.Title.Alliance = "Guard"
+SanctuaryLawman.Title.Horde = "Grunt"
+
+#
+#    SanctuaryLawman.Tabard.Alliance
+#    SanctuaryLawman.Tabard.Horde
+#        Description: Item whose appearance is forced into the tabard slot while on duty.
+#                     45574 is the Stormwind Tabard, 45581 the Orgrimmar Tabard.
+#
+#                     The player does not own it and never receives it - only the public
+#                     appearance field is written, so it costs them nothing and is taken
+#                     off again the moment they stand down. A tabard is used rather than
+#                     anything written next to their name because it carries no text, and
+#                     so cannot leak the identity the realm otherwise hides.
+#        Default:     45574 / 45581
+#
+
+SanctuaryLawman.Tabard.Alliance = 45574
+SanctuaryLawman.Tabard.Horde = 45581
+
+#
+#    SanctuaryLawman.Writ.Entry
+#        Description: item_template entry of the Writ of Accusation, added by this module's
+#                     world SQL. Change this only if you have moved the item.
+#        Default:     990000
+#
+
+#
+#        NOTE: these entries exist only in Sanctuary's client patch. The 3.3.5a client
+#        reads an item's class, subclass and display from its own Item.dbc, so without
+#        patch-enUS-4.MPQ installed they still work but render as question marks. Build it
+#        with tools/assets/make-patch.py.
+#
+SanctuaryLawman.Writ.Entry = 990000
+
+#
+#    SanctuaryLawman.Writ.PardonEntry
+#        Description: The Writ of Pardon, which undoes an accusation.
+#
+#                     Unlike the accusation writ this is a physical thing: not soulbound,
+#                     issued once alongside the irons rather than handed back at every
+#                     login, and therefore something that can be carried, lost, given away
+#                     or taken off a body. Only the accusation writ reappears on its own.
+#        Default:     990003
+#
+
+SanctuaryLawman.Writ.PardonEntry = 990003
+
+#
+#    SanctuaryLawman.Accusation.Minutes
+#        Description: How long an accused player is an outlaw for. This is a sentence, not
+#                     a flag they chose, so they cannot stand down from it early - which is
+#                     the entire reason the writ exists.
+#        Default:     30
+#
+
+SanctuaryLawman.Accusation.Minutes = 30
+
+#
+#    SanctuaryLawman.Accusation.CooldownSeconds
+#        Description: How long a lawman must wait between accusations. The item itself
+#                     carries no cooldown the client can show, because the writ suppresses
+#                     its own spell - so this is enforced here and refused with a message.
+#        Default:     60
+#
+
+SanctuaryLawman.Accusation.CooldownSeconds = 60
+
+#
+#    SanctuaryLawman.Accusation.Range
+#        Description: How close a lawman must be, in yards. Enforced in the module rather
+#                     than by the core: suppressing the writ's spell also skips the core's
+#                     own range and line of sight checks, so without this a modified client
+#                     could serve a writ across the zone.
+#        Default:     30
+#
+
+SanctuaryLawman.Accusation.Range = 30
+
+#
+#    SanctuaryLawman.Addon.Prefix
+#        Description: Addon message prefix. Must match the addon.
+#        Default:     "SLAW"
+#
+
+SanctuaryLawman.Addon.Prefix = "SLAW"
+
+########################################
+# Iron Shackles
+#
+# An item used on a player: a five second cast at five yards that disarms them and tethers
+# them within ten yards of whoever put them on, undone by an Iron Shackle Key.
+#
+# Nothing here checks for the office. Both items are tradeable and possession is the whole
+# authority, because a criminal obtaining a pair from a corrupt guard is the reason they
+# exist; every use is written to the log instead. A lawman is issued one set when they are
+# appointed, and only once - `.lawman kit <player>` replaces a set that was lost.
+#
+########################################
+
+#
+#    SanctuaryLawman.Shackles.Enable
+#        Description: Whether the shackles work at all. With it off both items refuse
+#                     politely and no tether is checked.
+#        Default:     1
+#
+
+SanctuaryLawman.Shackles.Enable = 1
+
+#
+#    SanctuaryLawman.Shackles.Entry
+#    SanctuaryLawman.Shackles.KeyEntry
+#        Description: item_template entries, added by this module's world SQL.
+#        Default:     990001 / 990002
+#
+
+SanctuaryLawman.Shackles.Entry = 990001
+SanctuaryLawman.Shackles.KeyEntry = 990002
+
+#
+#    SanctuaryLawman.Shackles.CastSpell
+#        Description: The five second cast that fits the irons. 81001 is Sanctuary's own
+#                     spell, added to the client by patch-enUS-4.MPQ and to the server by
+#                     the module's world SQL.
+#
+#                     It exists for its name. The cast bar shows the spell's name, the
+#                     client reads that from its own Spell.dbc, and nothing server-side can
+#                     change it - so a borrowed spell puts a borrowed word on the bar. Its
+#                     visual is the blacksmith's crafting animation, for the same reason.
+#
+#                     A retail spell can still be named here: the module corrects the cast
+#                     time, clears the channel bits, aims the effect at the caster and adds
+#                     the interrupt flags at load, which is what it used to do to 62646
+#                     "Shackle". Only the name and the animation cannot be corrected.
+#        Default:     81001
+#
+
+SanctuaryLawman.Shackles.CastSpell = 81001
+
+#
+#    SanctuaryLawman.Shackles.DisarmSpell
+#        Description: The aura applied to a shackled prisoner. 6608 "Dropped Weapon" is
+#                     SPELL_AURA_MOD_DISARM with a debuff name that reads correctly.
+#        Default:     6608
+#
+
+SanctuaryLawman.Shackles.DisarmSpell = 6608
+
+#
+#    SanctuaryLawman.Shackles.Minutes
+#        Description: How long a prisoner stays in irons if nobody unlocks them. The
+#                     shackle also ends if either party logs out, if the captor dies or
+#                     leaves the map, or when a key is turned.
+#        Default:     10
+#
+
+SanctuaryLawman.Shackles.Minutes = 10
+
+#
+#    SanctuaryLawman.Shackles.Tether
+#        Description: How far a prisoner may stray from their captor, in yards. The chain
+#                     drags rather than holds: crossing the line hauls them back to the
+#                     edge of the circle, not to the captor's feet, so they keep their
+#                     bearing and can still be walked somewhere.
+#        Default:     5
+#
+
+SanctuaryLawman.Shackles.Tether = 5
+
+#
+#    SanctuaryLawman.Shackles.KeyRange
+#        Description: How close you must be to turn a key, in yards. Checked in code: the
+#                     key suppresses its own cast, which skips the core's range check.
+#                     Matches Range, on the reasoning that unlocking somebody is no more
+#                     of an arm's-length job than shackling them was.
+#        Default:     0.5
+#
+
+SanctuaryLawman.Shackles.KeyRange = 0.5
+
+#
+#    SanctuaryLawman.Shackles.ChainVisualKit
+#        Description: SpellVisualKit played on the prisoner as the irons close. 1224 is the
+#                     chain out of Elven Manacles - iron rather than ice.
+#
+#                     It is a raw kit rather than a spell on purpose. A triggered cast draws
+#                     nothing on a prisoner who is not hostile, because triggering skips
+#                     CheckCast but not target selection, and the chain-themed spells want an
+#                     enemy. SMSG_PLAY_SPELL_VISUAL names the unit and the kit and nothing
+#                     else, so none of that applies.
+#
+#                     Other chains, if this one does not suit: 10714 (Constricting Chains),
+#                     1544 (Shackle Undead), 12185 (Chains of Ice impact), 11421 (Chains of
+#                     Ice, the lingering version). 0 turns it off.
+#        Default:     1224
+#
+
+SanctuaryLawman.Shackles.ChainVisualKit = 1224
+
+#
+#    SanctuaryLawman.Shackles.ChainAuraSpell
+#        Description: The chain everyone can see, worn for as long as the irons are on.
+#                     A one-shot kit cannot do this: a lasting chain is a *state* visual
+#                     and the client draws one only while an aura is present, so this is
+#                     an aura rather than a packet.
+#
+#                     81000 is Sanctuary's own spell, added to the client by
+#                     patch-enUS-4.MPQ and to the server by the module's world SQL. It
+#                     exists because an aura is labelled in letters above the prisoner and
+#                     the client reads that label from its own Spell.dbc - a borrowed spell
+#                     brings its own name and nothing server-side can change it. Both
+#                     halves must be installed or the chain never appears.
+#
+#                     Whatever is set here is stripped to a single inert dummy aura at
+#                     load, so a retail spell that charms or snares in its own right is
+#                     safe to name - only the artwork survives. Retail chains, if you want
+#                     one and do not mind its name showing: 45630 (Arcane Chains, the same
+#                     artwork as 81000), 68341 (Cosmetic Chains), 63861 (Chains of Law).
+#                     0 turns it off.
+#        Default:     81000
+#
+
+SanctuaryLawman.Shackles.ChainAuraSpell = 81000
+
+#
+#    SanctuaryLawman.Shackles.PullSpeed
+#    SanctuaryLawman.Shackles.PullIntervalMs
+#        Description: How hard and how often the chain hauls. A prisoner past the tether is
+#                     put back on the EDGE of it, keeping their bearing - a chain stops you
+#                     leaving, it does not reel you in, and dragging somebody to their
+#                     captor's feet would make walking a prisoner anywhere impossible.
+#
+#                     The interval matters as much as the speed: a tug every tick fights
+#                     the client's own movement the whole way and reads as rubber-banding.
+#        Default:     20 / 1000
+#
+
+SanctuaryLawman.Shackles.PullSpeed = 20
+SanctuaryLawman.Shackles.PullIntervalMs = 1000
+
+#
+#    SanctuaryLawman.Shackles.Range
+#        Description: How close you must be to shackle somebody, in yards. Checked by the
+#                     module both when the item is used and again when the cast finishes,
+#                     because a self-cast enforces no range of its own and five seconds is
+#                     long enough to walk apart.
+#
+#                     Measured surface to surface, not centre to centre: the core adds both
+#                     parties' bounding radii before comparing. Half a yard therefore means
+#                     roughly a yard and a quarter between the two of them - close enough
+#                     to lay hands on somebody, and no further.
+#        Default:     0.5
+#
+
+SanctuaryLawman.Shackles.Range = 0.5
+
+#
+#    SanctuaryLawman.Shackles.CastEmote
+#        Description: A looping pose held by the captor for the length of the cast, on top
+#                     of whatever the spell itself plays.
+#
+#                     Off, because CastSpell now carries its own animation - the
+#                     enchanter's, which is a person working at what they are facing. A
+#                     state emote is a loop and it wins over a cast animation, so setting
+#                     this would hide the animation rather than add to it.
+#
+#                     It is kept for the case where the spell's animation stops playing:
+#                     173 is generic work, 28 the same with weapons stowed, 233 mining,
+#                     234 chopping. The module clears it when the cast stops for any
+#                     reason, and only ever clears a value it set itself.
+#        Default:     0
+#
+
+SanctuaryLawman.Shackles.CastEmote = 0
+
+#
+#    SanctuaryLawman.Search.Entry
+#        Description: The Search Gloves. Used on somebody in irons, they read that person's
+#                     pack and purse out to whoever is holding them.
+#
+#                     Authority by possession, like the writs and the shackles: the gloves
+#                     permit the search, not the office, so they can be lost, handed on or
+#                     taken off a body. Nothing can be taken with them - a window onto a live
+#                     inventory that also lets you take from it duplicates items unless every
+#                     take is mirrored as a destroy, and the prisoner may be using that item
+#                     while it is open. Whatever changes hands afterwards is an ordinary
+#                     trade.
+#
+#                     Needs the client patch: without it the gloves are a question mark.
+#        Default:     990005
+#
+
+SanctuaryLawman.Search.Entry = 990005
+
+#
+#    SanctuaryLawman.Search.Range
+#        Description: How close you must be to search somebody, in yards. Checked in code,
+#                     because the item suppresses its own cast and so skips the core's range
+#                     check. Comfortably inside the shackle tether, so a prisoner on the end
+#                     of their chain is always within reach.
+#        Default:     5
+#
+
+SanctuaryLawman.Search.Range = 5

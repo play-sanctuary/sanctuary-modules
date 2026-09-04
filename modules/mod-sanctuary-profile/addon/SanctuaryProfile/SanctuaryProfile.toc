@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Sanctuary Profile
+## Notes: A glance at somebody: appearance, injuries, manner and one detail.
+## Author: Sanctuary
+## Version: 1.4
+## SavedVariablesPerCharacter: SanctuaryProfileDB
+
+SanctuaryProfile.lua

@@ -1,0 +1,212 @@
+[worldserver]
+
+########################################
+# mod-sanctuary-outlaw
+#
+# A flag a player puts on themselves to say "I am open to violence" - for a robbery, a
+# duel to the death, or an execution carried out by somebody else's hand. `.outlaw on`,
+# `.outlaw off`, or the button the addon draws.
+#
+# Read this before changing anything below, because two of these settings decide whether
+# the whole thing works at all.
+#
+# The 3.3.5a client runs its own copy of the server's attack check. Whatever the server
+# permits, the client will refuse to let a player attack somebody it believes is friendly,
+# and it will do so silently. The ONLY thing the client sees that this module can change
+# is the faction template - which is why Faction below is the load-bearing setting and
+# the other three are refinements on top of it.
+#
+########################################
+
+#
+#    SanctuaryOutlaw.Enable
+#        Description: Whether outlawry exists on this realm at all. With it off, `.outlaw`
+#                     refuses politely and no hook does any work.
+#        Default:     1
+#
+
+SanctuaryOutlaw.Enable = 1
+
+#
+#    SanctuaryOutlaw.WantedFaction
+#        Description: Faction template an outlaw wears BEFORE they have hurt anybody -
+#                     attackable by anyone, hunted by nobody.
+#
+#                     2300 is Sanctuary's own, added by the module's world SQL and by
+#                     patch-enUS-4.MPQ: ourMask 0x1 keeps them in the player group,
+#                     friendlyMask 0x0 means neither side claims them as kin, and hostileMask
+#                     0x8 leaves ordinary monsters exactly as dangerous to them as to anyone
+#                     else. Both halves must be installed or outlaws keep their own faction.
+#
+#                     A neutral faction is attackable because of one bit. A Human's
+#                     friendlyMask is 0x2 (ALLIANCE), not 0x1 (PLAYER) - so a template
+#                     carrying only the player bit is friendly to nobody and hostile to
+#                     nobody, in both directions, for all ten playable races. That clears
+#                     the check that rejects a pair reading actively friendly, and the PvP
+#                     rules below it then allow the strike on their own terms.
+#
+#                     A replacement must have NO reputation entry behind it. Booty Bay's
+#                     template (121) has identical masks and does not work at all: reaction
+#                     between two players is answered from the attacker's standing with the
+#                     target's faction and returns FRIENDLY before any mask is compared, so
+#                     the server refuses every attack while the client still shows a hostile
+#                     cursor. The module checks this at startup and says so in the log.
+#
+#                     Set to 0 to leave the faction alone, which returns outlawry to the
+#                     stock mutual behaviour - two flagged players may fight each other and
+#                     nobody else.
+#        Default:     121
+#
+
+SanctuaryOutlaw.WantedFaction = 2300
+
+#
+#    SanctuaryOutlaw.Faction
+#        Description: Faction template an outlaw wears once they have struck somebody. 14
+#                     is "Monster": hostile to the player group, so the whole town turns
+#                     out rather than merely tolerating them.
+#
+#                     On its own it does NOT make guards react, however much it looks as
+#                     though it should - a creature's reaction to a player is answered from
+#                     the player's reputation and returns before the faction is ever
+#                     compared. GuardsAttack below is what unlocks that, and it is applied
+#                     only in this state.
+#
+#                     Set equal to WantedFaction to abolish the distinction and have every
+#                     outlaw hunted from the moment they flag, which is how this module
+#                     behaved before the two states existed.
+#        Default:     14
+#
+
+SanctuaryOutlaw.Faction = 14
+
+#
+#    SanctuaryOutlaw.EscalateOnAttack
+#        Description: Whether damaging a player who is not themselves an outlaw promotes an
+#                     outlaw from wanted to hostile.
+#
+#                     Damage rather than entering combat, because combat is entered by being
+#                     attacked as well as by attacking, and only one of those is a crime.
+#                     Outlaw-on-outlaw never escalates: both parties declared themselves
+#                     open to it, and the watch has no business in that.
+#
+#                     Hostility is stored, not merely held in memory, so it cannot be
+#                     laundered by logging out to the character screen.
+#        Default:     1
+#
+
+SanctuaryOutlaw.EscalateOnAttack = 1
+
+#
+#    SanctuaryOutlaw.HostileMinutes
+#        Description: How long the town stays angry, in minutes. 0 means it never cools off
+#                     on its own - they stay hunted for as long as they remain an outlaw,
+#                     and standing down or serving the sentence is the only way out.
+#
+#                     A non-zero value lets somebody wait out the hue and cry while staying
+#                     flagged, which suits a realm where robbery is meant to be survivable.
+#
+#                     The clock starts on the attack that got them wanted, not on going
+#                     outlaw, and each fresh attack restarts it.
+#        Default:     10
+#
+
+SanctuaryOutlaw.HostileMinutes = 10
+
+#
+#    SanctuaryOutlaw.GuardsAttack
+#        Description: Whether the world at large turns on an outlaw.
+#
+#                     Sets UNIT_FLAG2_IGNORE_REPUTATION on them, which makes the core skip
+#                     the reputation branch when a creature works out how it feels about
+#                     this player, and fall through to comparing factions instead. Only
+#                     then does the Faction setting above mean anything to an NPC.
+#
+#                     It is deliberately broad: every creature whose faction is hostile to
+#                     Monster reacts, which is the city NPCs of BOTH sides and not only
+#                     the guards. An outlaw cannot walk through a town. Turning this off
+#                     leaves outlawry purely a matter between players.
+#
+#                     Needs Faction to be set to something the world dislikes; with
+#                     Faction = 0 this does nothing useful.
+#        Default:     1
+#
+
+SanctuaryOutlaw.GuardsAttack = 1
+
+#
+#    SanctuaryOutlaw.SetPvPFlag
+#        Description: Also gives an outlaw the ordinary PvP flag. This is what satisfies
+#                     the `target->IsPvP()` test in the core's attack check, and it is
+#                     what lets an ordinary player strike an outlaw.
+#        Default:     1
+#
+
+SanctuaryOutlaw.SetPvPFlag = 1
+
+#
+#    SanctuaryOutlaw.AllowStrikingUnflagged
+#        Description: Sets UNIT_BYTE2_FLAG_UNK1 on an outlaw, which satisfies the core's
+#                     either-side clause and lets an outlaw strike a victim who is not
+#                     flagged at all - the direction a robbery actually needs.
+#
+#                     Whether the client honours the same bit is the one genuinely
+#                     untested thing here. If outlaws can be hit but cannot hit back at an
+#                     unflagged victim, this is the setting that did not take, and the
+#                     answer is to make the victim flag first rather than to force it.
+#        Default:     1
+#
+
+SanctuaryOutlaw.AllowStrikingUnflagged = 1
+
+#
+#    SanctuaryOutlaw.ForceReaction
+#        Description: Stops two players of one side reading as friends while either is an
+#                     outlaw. Without it the core rejects the attack before it ever looks
+#                     at any PvP flag.
+#
+#                     This runs on every reaction check in the world, so it is written to
+#                     get out of the way immediately when nobody is flagged. Turn it off
+#                     only to rule it out while diagnosing something.
+#        Default:     1
+#
+
+SanctuaryOutlaw.ForceReaction = 1
+
+#
+#    SanctuaryOutlaw.RequireOutOfCombat
+#        Description: Refuses `.outlaw off` while the player is in PvP combat. Without
+#                     this the flag is an escape button: strike, drop it, and stand there
+#                     untouchable while the person you hit is still swinging.
+#        Default:     1
+#
+
+SanctuaryOutlaw.RequireOutOfCombat = 1
+
+#
+#    SanctuaryOutlaw.ReleaseSeconds
+#        Description: How long the flag lingers after a player asks to stand down. The
+#                     combat check above closes the worst of the escape; this closes
+#                     backing off two paces and dropping it. 0 makes it immediate.
+#        Default:     60
+#
+
+SanctuaryOutlaw.ReleaseSeconds = 60
+
+#
+#    SanctuaryOutlaw.MaxSentenceMinutes
+#        Description: Longest sentence `.outlaw set` can hand down, in minutes. Requests
+#                     above it are clamped rather than refused, so a mistyped number is a
+#                     long sentence rather than a permanent one nobody notices.
+#        Default:     1440
+#
+
+SanctuaryOutlaw.MaxSentenceMinutes = 1440
+
+#
+#    SanctuaryOutlaw.Addon.Prefix
+#        Description: Addon message prefix. Must match the addon.
+#        Default:     "SOUTLAW"
+#
+
+SanctuaryOutlaw.Addon.Prefix = "SOUTLAW"

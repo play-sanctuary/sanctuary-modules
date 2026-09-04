@@ -1,0 +1,66 @@
+[worldserver]
+
+#
+#    SanctuaryEmote.Enable
+#        Description: /do - an unattributed emote describing the scene rather than a
+#                     character, read by everyone nearby.
+#        Default:     1
+#
+
+SanctuaryEmote.Enable = 1
+
+#
+#    SanctuaryEmote.Range
+#        Description: How far a /do carries, in yards. Wider than /say on purpose: it is
+#                     describing a room, not something whispered across a table.
+#        Default:     40.0
+#
+
+SanctuaryEmote.Range = 40.0
+
+#
+#    SanctuaryEmote.MaxLength
+#        Description: Longest a single /do may be. Clamped to 32-255.
+#        Default:     255
+#
+
+SanctuaryEmote.MaxLength = 255
+
+#
+#    SanctuaryEmote.CooldownSeconds
+#        Description: Seconds between one player's /do lines. This is the only broadcast on
+#                     the realm that carries no name, so it needs a brake. Game masters are
+#                     exempt. 0 disables it.
+#        Default:     3
+#
+
+SanctuaryEmote.CooldownSeconds = 3
+
+#
+#    SanctuaryEmote.Colour
+#        Description: Colour of a /do line, as RRGGBB without the leading pipe escape. It
+#                     wants to be distinct from say, emote and system, or the thing it is
+#                     describing gets mistaken for something a character did.
+#        Default:     "b9a2d1"
+#
+
+SanctuaryEmote.Colour = "b9a2d1"
+
+#
+#    SanctuaryEmote.ShowAuthorToGameMasters
+#        Description: Append the author's name for game masters only. On a realm where
+#                     nobody knows who anybody is, an anonymous line reaching everyone in
+#                     earshot should still be traceable by somebody. It is always written
+#                     to the server log regardless.
+#        Default:     1
+#
+
+SanctuaryEmote.ShowAuthorToGameMasters = 1
+
+#
+#    SanctuaryEmote.Addon.Prefix
+#        Description: Addon message prefix. Must match the addon.
+#        Default:     "SEMO"
+#
+
+SanctuaryEmote.Addon.Prefix = "SEMO"

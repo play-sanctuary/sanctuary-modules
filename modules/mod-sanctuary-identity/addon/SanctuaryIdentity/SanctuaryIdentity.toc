@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Sanctuary Identity
+## Notes: Strangers read as their race until you introduce yourself. Minimap button toggles a disguise.
+## Author: Sanctuary
+## Version: 2.3
+## SavedVariablesPerCharacter: SanctuaryIdentityDB
+
+SanctuaryIdentity.lua

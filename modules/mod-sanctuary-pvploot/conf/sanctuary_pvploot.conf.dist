@@ -1,0 +1,142 @@
+[worldserver]
+
+#
+#    SanctuaryPvpLoot.Enable
+#        Description: Killing another player in open-world PvP leaves their corpse lootable.
+#        Default:     1
+#
+
+SanctuaryPvpLoot.Enable = 1
+
+#
+#    SanctuaryPvpLoot.Announce
+#        Description: Tell both players what was taken.
+#        Default:     1
+#
+
+SanctuaryPvpLoot.Announce = 1
+
+#
+#    SanctuaryPvpLoot.ExplainToGameMasters
+#        Description: When a kill produces nothing, tell the killer why - but only if their
+#                     account is game master or above. The gates and an unlucky roll are
+#                     otherwise indistinguishable from in game, which is exactly how a realm
+#                     of level-1 test characters looked like a broken module for days.
+#                     Judged on account security, not GM mode, because .gm off is itself one
+#                     of the reasons a kill is declined.
+#        Default:     1
+#
+
+SanctuaryPvpLoot.ExplainToGameMasters = 1
+
+#
+#    SanctuaryPvpLoot.Gold.Percent
+#        Description: Share of the coin the victim is carrying that moves to their corpse.
+#        Default:     10.0
+#
+
+SanctuaryPvpLoot.Gold.Percent = 10.0
+
+#
+#    SanctuaryPvpLoot.Item.Chance
+#        Description: Chance, per eligible item, that it drops. Rolled against each item
+#                     the victim carries until MaxPerKill have dropped.
+#        Default:     3.0
+#
+
+SanctuaryPvpLoot.Item.Chance = 3.0
+
+#
+#    SanctuaryPvpLoot.Item.MaxPerKill
+#        Description: Most items one death can cost.
+#        Default:     1
+#
+
+SanctuaryPvpLoot.Item.MaxPerKill = 1
+
+#
+#    SanctuaryPvpLoot.Item.TakeSoulbound
+#        Description: Allow soulbound items to drop. Off by default: soulbound gear is
+#                     most of what a character owns, and losing it is a far bigger penalty
+#                     than the 3% chance suggests.
+#        Default:     0
+#
+
+SanctuaryPvpLoot.Item.TakeSoulbound = 0
+
+#
+#    SanctuaryPvpLoot.Item.TakeEquipped
+#        Description: Allow worn gear to drop, not just bag contents.
+#        Default:     0
+#
+
+SanctuaryPvpLoot.Item.TakeEquipped = 0
+
+#
+#    SanctuaryPvpLoot.Item.MaxQuality
+#        Description: Highest quality that may drop.
+#                     0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary.
+#        Default:     4
+#
+
+SanctuaryPvpLoot.Item.MaxQuality = 4
+
+#
+#    SanctuaryPvpLoot.Allow.*
+#        Description: Where this applies. Battlegrounds are off because they already have
+#                     the real insignia mechanic, and both would compete to convert the
+#                     same corpse. Duels are off because a duel is not a robbery.
+#        Default:     all 0
+#
+
+SanctuaryPvpLoot.Allow.Battleground = 0
+SanctuaryPvpLoot.Allow.Arena = 0
+SanctuaryPvpLoot.Allow.Duel = 0
+SanctuaryPvpLoot.Allow.Sanctuary = 0
+SanctuaryPvpLoot.Allow.GameMasters = 0
+SanctuaryPvpLoot.Allow.SameAccount = 0
+
+#
+#    SanctuaryPvpLoot.MinLevel
+#        Description: Characters below this level lose nothing.
+#        Default:     10
+#
+
+SanctuaryPvpLoot.MinLevel = 10
+
+#
+#    SanctuaryPvpLoot.MaxLevelGap
+#        Description: Skip the drop when the two are further apart than this many levels.
+#                     0 disables the check.
+#        Default:     0
+#
+
+SanctuaryPvpLoot.MaxLevelGap = 0
+
+#
+#    SanctuaryPvpLoot.RepeatCooldownSeconds
+#        Description: The same killer cannot farm the same victim again within this window.
+#        Default:     900
+#
+
+SanctuaryPvpLoot.RepeatCooldownSeconds = 900
+
+#
+#    SanctuaryPvpLoot.LootableSeconds
+#        Description: How long the sack lies on the ground before it despawns, taking
+#                     anything unlooted with it.
+#        Default:     300
+#
+
+SanctuaryPvpLoot.LootableSeconds = 300
+
+#
+#    SanctuaryPvpLoot.SpoilsEntry
+#        Description: gameobject_template entry of the sack that holds the spoils. Only
+#                     change this if you want a different model; the object must be type
+#                     10 (goober) with no loot id, or the module cannot restrict it to the
+#                     killer and the core would overwrite its contents.
+#        Default:     990001
+#
+
+SanctuaryPvpLoot.SpoilsEntry = 990001

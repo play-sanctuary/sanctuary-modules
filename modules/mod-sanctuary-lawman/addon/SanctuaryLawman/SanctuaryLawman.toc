@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Sanctuary Lawman
+## Notes: Going on and off duty as a Guard or Grunt.
+## Author: Sanctuary
+## Version: 1.0
+## SavedVariablesPerCharacter: SanctuaryLawmanDB
+
+SanctuaryLawman.lua

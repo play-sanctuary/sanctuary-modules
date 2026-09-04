@@ -1,0 +1,43 @@
+# Build output
+build/
+Build/
+bin/
+obj/
+out/
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.a
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Live configuration — templates ship as .conf.dist, never the filled-in copy.
+# These hold database credentials and shared secrets.
+*.conf
+!*.conf.dist
+*.env
+!*.env.example
+appsettings.json
+appsettings.*.json
+!appsettings.example.json
+
+# Logs and runtime state
+logs/
+*.log
+
+# Editor and OS
+.vs/
+.vscode/
+.idea/
+*.user
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,7 @@
+## Interface: 30300
+## Title: Sanctuary GM
+## Notes: Game master panel: spawn, morph, sounds and object placement.
+## Author: Sanctuary
+## Version: 1.4
+
+SanctuaryGM.lua

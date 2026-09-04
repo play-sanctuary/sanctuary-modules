@@ -1,0 +1,102 @@
+[worldserver]
+
+#
+#    SanctuaryDeath.Enable
+#        Description: Death rules: no returning to your own body, and a spirit healer that
+#                     tells you the truth about your options.
+#        Default:     1
+#
+
+SanctuaryDeath.Enable = 1
+
+#
+#    SanctuaryDeath.BlockCorpseResurrection
+#        Description: Refuse a player's attempt to resurrect at their own corpse. The body
+#                     itself is left exactly where it fell - it is not removed - because a
+#                     released player is raised by another player *through* their corpse.
+#                     Delete it and nobody could ever raise them again.
+#        Default:     1
+#
+
+SanctuaryDeath.BlockCorpseResurrection = 1
+
+#
+#    SanctuaryDeath.Exclude.Battleground
+#        Description: Leave battlegrounds alone. They resurrect on their own timer and have
+#                     never offered a corpse run, so the rule changes nothing there.
+#                     Arenas need no setting: the core refuses corpse reclaim in them
+#                     before this module is ever consulted.
+#        Default:     1
+#
+
+SanctuaryDeath.Exclude.Battleground = 1
+
+#
+#    SanctuaryDeath.Exclude.Instances
+#        Description: Leave dungeons and raids alone. Off, so a wipe costs a walk back from
+#                     the entrance graveyard like anywhere else. See StrandedMinutes below,
+#                     which is what stops that becoming a trap.
+#        Default:     0
+#
+
+SanctuaryDeath.Exclude.Instances = 0
+
+#
+#    SanctuaryDeath.StrandedMinutes
+#        Description: After this long as a ghost, allow the corpse resurrection after all.
+#
+#                     This is a safety valve, not a grace period. Somewhere with no
+#                     reachable spirit healer - the wrong dungeon, a bad graveyard link -
+#                     a player with no corpse resurrection and nobody to raise them would
+#                     be stuck as a ghost permanently, with no command that helps. This
+#                     guarantees being stranded is always temporary.
+#
+#                     0 disables the valve entirely. Do not set 0 unless you are certain
+#                     every graveyard on the realm has a working spirit healer.
+#        Default:     10
+#
+
+SanctuaryDeath.StrandedMinutes = 10
+
+#
+#    SanctuaryDeath.BlockedMessage
+#        Description: Shown when a corpse resurrection is refused. The client draws its own
+#                     "Resurrect Now" button and cannot know we said no, so without this the
+#                     button simply does nothing and reads as a broken server. Name both
+#                     ways back: the second one is the one players forget.
+#
+
+SanctuaryDeath.BlockedMessage = "You cannot return to your body. Find a spirit healer, or wait - someone may still raise you."
+
+#
+#    SanctuaryDeath.ReplaceSpiritHealerDialog
+#        Description: Replace the spirit healer's conversation with our own.
+#
+#                     The stock dialogue warns about resurrection sickness, which this realm
+#                     does not apply (Death.SicknessLevel = 81), so the only thing it says is
+#                     false. Taking the conversation over stops the client's popup appearing
+#                     at all, because the option that triggers it is never offered.
+#
+#                     Applies to creature templates 6491 and 29259 via ScriptName; a living
+#                     player clicking a spirit healer is unaffected either way.
+#        Default:     1
+#
+
+SanctuaryDeath.ReplaceSpiritHealerDialog = 1
+
+#
+#    SanctuaryDeath.Healer.Body
+#        Description: What the spirit healer tells a ghost. This is the line that replaces
+#                     the sickness warning, so it should say the thing that is actually
+#                     true and actually useful: coming back here is a choice.
+#
+
+SanctuaryDeath.Healer.Body = "This is not your only road back. A companion may still raise you where you fell."
+
+#
+#    SanctuaryDeath.Healer.Confirm / .Decline
+#        Description: The two options under it.
+#
+
+SanctuaryDeath.Healer.Confirm = "Return me to life."
+SanctuaryDeath.Healer.Decline = "Not yet. I will wait."

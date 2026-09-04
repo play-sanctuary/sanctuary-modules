@@ -1,0 +1,7 @@
+## Interface: 30300
+## Title: Sanctuary Emote
+## Notes: /do - describe the scene rather than yourself.
+## Author: Sanctuary
+## Version: 1.0
+
+SanctuaryEmote.lua

@@ -1,0 +1,47 @@
+[worldserver]
+
+#
+#    SanctuaryProfile.Enable
+#        Description: Short in-character descriptions, shown when you look closer at
+#                     somebody stood in front of you.
+#        Default:     1
+#
+
+SanctuaryProfile.Enable = 1
+
+#
+#    SanctuaryProfile.MaxFieldLength
+#        Description: Longest a single line of a description may be. The cap is the whole
+#                     design: it is meant to be a glance, not a biography, and the rest is
+#                     supposed to be found out in character. Clamped to 40-200.
+#        Default:     160
+#
+
+SanctuaryProfile.MaxFieldLength = 160
+
+#
+#    SanctuaryProfile.LookRange
+#        Description: How close you must be to read somebody's description, in yards.
+#                     This is a privacy setting as much as a roleplaying one: without it,
+#                     anyone could read every description on the realm without ever being
+#                     seen doing it.
+#        Default:     40.0
+#
+
+SanctuaryProfile.LookRange = 40.0
+
+#
+#    SanctuaryProfile.MaxQueriesPerSecond
+#        Description: Looks allowed per player per second.
+#        Default:     10
+#
+
+SanctuaryProfile.MaxQueriesPerSecond = 10
+
+#
+#    SanctuaryProfile.Addon.Prefix
+#        Description: Addon message prefix. Must match the addon.
+#        Default:     "SPRO"
+#
+
+SanctuaryProfile.Addon.Prefix = "SPRO"

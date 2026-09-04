@@ -1,0 +1,197 @@
+[worldserver]
+
+########################################
+# mod-proximity-voice configuration
+########################################
+#
+#    ProximityVoice.Enable
+#        Description: Master switch. When off the module does nothing at all and
+#                     never opens a socket.
+#        Default:     0 - (Disabled)
+#
+
+ProximityVoice.Enable = 0
+
+#
+#    ProximityVoice.Announce
+#        Description: Tell players on login that voice is available, and notify
+#                     them when their voice client attaches or drops.
+#        Default:     1 - (Enabled)
+#
+
+ProximityVoice.Announce = 1
+
+########################################
+# Link to the voice server
+########################################
+#
+#    ProximityVoice.Bridge.Host / .Port
+#        Description: Where SanctuaryVoice.Server listens for the world server.
+#                     Keep this on loopback unless the voice server runs on a
+#                     different machine than worldserver; the link carries every
+#                     player position on the realm.
+#        Default:     "127.0.0.1" / 7788
+#
+
+ProximityVoice.Bridge.Host = "127.0.0.1"
+ProximityVoice.Bridge.Port = 7788
+
+#
+#    ProximityVoice.Bridge.Secret
+#        Description: Shared secret the world server presents to the voice
+#                     server. Must match "bridgeSecret" in voiceserver.json.
+#                     Change this before enabling the module.
+#        Default:     "change-me"
+#
+
+ProximityVoice.Bridge.Secret = "change-me"
+
+#
+#    ProximityVoice.Bridge.ReconnectMs
+#        Description: How long to wait before retrying a dropped bridge link.
+#                     The world server keeps running normally while the voice
+#                     server is down; state is re-published on reconnect.
+#        Default:     5000
+#
+
+ProximityVoice.Bridge.ReconnectMs = 5000
+
+########################################
+# What the voice clients are told to connect to
+########################################
+#
+#    ProximityVoice.Client.Host / .Port
+#        Description: The address players put into the Sanctuary Voice client.
+#                     For a public realm this is your public hostname or IP, not
+#                     127.0.0.1. Announced in chat and to the in-game addon.
+#        Default:     "127.0.0.1" / 7789
+#
+
+ProximityVoice.Client.Host = "127.0.0.1"
+ProximityVoice.Client.Port = 7789
+
+#
+#    ProximityVoice.Token.TTLSeconds
+#        Description: How long a login code issued by .voice token stays valid.
+#        Default:     300
+#
+
+ProximityVoice.Token.TTLSeconds = 300
+
+########################################
+# Position streaming
+########################################
+#
+#    ProximityVoice.Update.IntervalMs
+#        Description: How often player positions are pushed to the voice server.
+#                     150 ms is smooth for walking speed. Lower values cost
+#                     bandwidth on the bridge, not client bandwidth.
+#        Default:     150
+#
+
+ProximityVoice.Update.IntervalMs = 150
+
+#
+#    ProximityVoice.Update.PositionEpsilon
+#        Description: Movement in yards below which a position push is skipped.
+#        Default:     0.35
+#
+
+ProximityVoice.Update.PositionEpsilon = 0.35
+
+#
+#    ProximityVoice.Update.OrientationEpsilon
+#        Description: Facing change in radians below which a push is skipped.
+#                     Facing only matters for stereo panning.
+#        Default:     0.15
+#
+
+ProximityVoice.Update.OrientationEpsilon = 0.15
+
+#
+#    ProximityVoice.Update.KeepAliveMs
+#        Description: A motionless player is still refreshed this often so the
+#                     voice server can tell "standing still" from "stale".
+#        Default:     2000
+#
+
+ProximityVoice.Update.KeepAliveMs = 2000
+
+########################################
+# Speaking distance
+########################################
+#
+#    ProximityVoice.Range.Default / .Min / .Max
+#        Description: The speaking distance window, in yards. Default matches
+#                     the /say radius. Players choose within [Min, Max] from the
+#                     voice client or with .voice range; the world server clamps
+#                     whatever they ask for, so a patched client gains nothing.
+#                     For reference: /say is 25 yards, /yell is 300.
+#        Default:     25.0 / 5.0 / 100.0
+#
+
+ProximityVoice.Range.Default = 25.0
+ProximityVoice.Range.Min = 5.0
+ProximityVoice.Range.Max = 100.0
+
+########################################
+# Attenuation
+########################################
+#
+#    ProximityVoice.Attenuation.Reference
+#        Description: Distance in yards within which a speaker is at full
+#                     volume. Beyond it, volume rolls off toward the edge of
+#                     their speaking distance.
+#        Default:     8.0
+#        Note:        Read by the voice server from voiceserver.json, listed
+#                     here only so the tuning knobs are documented together.
+#
+
+########################################
+# Language barrier
+########################################
+#
+#    ProximityVoice.Language.Enforce
+#        Description: Apply the same language rules to voice as text chat does. A
+#                     listener who has not learned the speaker's language never
+#                     receives the audio - they get a loudness envelope their
+#                     client resynthesises, so the rhythm and emphasis survive but
+#                     no words do.
+#
+#                     Off by default. The synthesised voice is a buzz, and two
+#                     players who cannot understand each other hearing nothing but
+#                     a buzz is far more often a confusing bug report than the
+#                     roleplaying effect it was meant to be. Turn it on only if you
+#                     actually want cross-faction speech to be unintelligible.
+#        Default:     0 - (Disabled)
+#
+ProximityVoice.Language.Enforce = 0
+
+#
+#    ProximityVoice.Language.GameMastersUnderstandAll
+#        Description: Game masters hear every language clearly, and are
+#                     understood by everyone.
+#        Default:     1 - (Enabled)
+#
+
+ProximityVoice.Language.GameMastersUnderstandAll = 1
+
+########################################
+# Death
+########################################
+#
+#    ProximityVoice.Dead.CanSpeak
+#        Description: Whether a dead or ghost player can transmit at all.
+#        Default:     0 - (Disabled)
+#
+
+ProximityVoice.Dead.CanSpeak = 0
+
+#
+#    ProximityVoice.Dead.HearOnlyDead
+#        Description: When a dead player may speak, restrict who hears them to
+#                     other dead players.
+#        Default:     1 - (Enabled)
+#
+
+ProximityVoice.Dead.HearOnlyDead = 1

@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Sanctuary Board
+## Notes: A window for the notice board, with room to read a whole bill.
+## Author: Sanctuary
+## Version: 1.0
+
+SanctuaryBoard.lua
+SanctuaryBoardWindow.lua

@@ -1,0 +1,80 @@
+[worldserver]
+
+#
+#    SanctuaryStash.Enable
+#        Description: Strongboxes: shared containers standing in the world, each opened by
+#                     whoever carries its key. With this off the objects are inert and no
+#                     hook does any work.
+#        Default:     1
+#
+
+SanctuaryStash.Enable = 1
+
+#
+#    SanctuaryStash.Range
+#        Description: How close a player must be to a strongbox, in yards - both to open one
+#                     and to keep it open. Checked on every message rather than once when it
+#                     opened, so a window left open while its owner walks off - or is killed,
+#                     or has the key taken from them - stops working immediately.
+#
+#                     Measured surface to surface: the core adds both bounding radii before
+#                     comparing, so half a yard is a little over a yard between the two of
+#                     you. Close enough to be leaning on the box.
+#        Default:     0.5
+#
+
+SanctuaryStash.Range = 0.5
+
+#
+#    SanctuaryStash.Addon.Prefix
+#        Description: The addon channel this module talks on. Only worth changing if it
+#                     collides with something else, and the addon has to be changed to match.
+#        Default:     "SSTASH"
+#
+
+SanctuaryStash.Addon.Prefix = "SSTASH"
+
+#
+#    SanctuaryStash.ObjectEntry
+#        Description: The gameobject_template a `.stash place` spawns, and what the commands
+#                     look for underfoot when keying or renaming a box.
+#        Default:     990100
+#
+
+SanctuaryStash.ObjectEntry = 990100
+
+#
+#    SanctuaryStash.Locksmith.Price
+#        Description: What a rogue trainer charges to cut a duplicate key, in copper.
+#                     10000 is one gold.
+#
+#                     Copying is deliberately cheap enough to be worth doing and dear enough
+#                     to notice: a key that can be duplicated for nothing is a key that means
+#                     nothing, since anyone who ever held one could arm the whole realm.
+#        Default:     10000
+#
+
+SanctuaryStash.Locksmith.Price = 10000
+
+#
+#    SanctuaryStash.Locksmith.TextId
+#        Description: The npc_text row shown above the list of keys he will copy. The module's
+#                     world SQL creates it; SendGossipMenuFor needs a real row or the window
+#                     opens empty.
+#        Default:     990200
+#
+
+SanctuaryStash.Locksmith.TextId = 990200
+
+#
+#    SanctuaryStash.OpenSpell
+#        Description: The two second cast that works a strongbox open. 81011 is Sanctuary's
+#                     own, added by the client patch and the module's world SQL; its visual
+#                     is the kneel-and-work animation the client already plays for chests.
+#
+#                     The spell carries the delay, the animation AND the interrupt, so
+#                     walking off cancels the opening without this module watching for it.
+#        Default:     81011
+#
+
+SanctuaryStash.OpenSpell = 81011

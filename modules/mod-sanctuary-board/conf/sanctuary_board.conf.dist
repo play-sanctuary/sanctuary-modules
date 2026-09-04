@@ -1,0 +1,83 @@
+[worldserver]
+
+#
+#    SanctuaryBoard.Enable
+#        Description: Town notice boards players can pin bills to.
+#        Default:     1
+#
+
+SanctuaryBoard.Enable = 1
+
+#
+#    SanctuaryBoard.MaxPostsPerCharacter
+#        Description: How many notices one character may have up at once.
+#        Default:     3
+#
+
+SanctuaryBoard.MaxPostsPerCharacter = 3
+
+#
+#    SanctuaryBoard.ExpiryDays
+#        Description: Days before a notice comes down on its own. 0 keeps them forever,
+#                     which in practice means the board fills and stops being read.
+#        Default:     14
+#
+
+SanctuaryBoard.ExpiryDays = 14
+
+#
+#    SanctuaryBoard.MaxLength
+#        Description: Longest notice, in characters. Capped at 255 by the client's own
+#                     gossip input box.
+#        Default:     255
+#
+
+SanctuaryBoard.MaxLength = 255
+
+#
+#    SanctuaryBoard.ListLimit
+#        Description: Notices shown on the board at once, newest first. The gossip menu
+#                     holds about 20 rows including the buttons.
+#        Default:     12
+#
+
+SanctuaryBoard.ListLimit = 12
+
+#
+#    SanctuaryBoard.MinLevel
+#        Description: Level needed to use a board at all. Raise it if boards get spammed
+#                     by throwaway characters.
+#        Default:     1
+#
+
+SanctuaryBoard.MinLevel = 1
+
+#
+#    SanctuaryBoard.ModeratorSecurity
+#        Description: Account security needed to see who wrote a notice and to take down
+#                     somebody else's. 0 player, 1 moderator, 2 game master, 3 administrator.
+#                     Re-checked on every action: the gossip action a client sends back is
+#                     just a number, and nothing stops an ordinary player sending the
+#                     moderator one by hand.
+#        Default:     2
+#
+
+SanctuaryBoard.ModeratorSecurity = 2
+
+#
+#    SanctuaryBoard.Range
+#        Description: How far a reader may stray from a board before the window closes and
+#                     the server stops answering it. Checked on every message, not just when
+#                     the board is clicked.
+#
+#                     0 means the board's own reach - GameObject::IsAtInteractDistance, the
+#                     exact test the core applies when you click it, which accounts for the
+#                     model's bounding box. For a type 2 object that is a radius of 5.5555553
+#                     yards around the box. Leave it at 0 unless you want the board tighter
+#                     than the client lets you click it: any other number is a second range
+#                     that disagrees with the cursor, and the gap between them is a band where
+#                     the board lights up and then refuses you.
+#        Default:     0
+#
+
+SanctuaryBoard.Range = 0

@@ -1,0 +1,16 @@
+# Normalise line endings in the repository to LF; check out native on Windows.
+* text=auto
+
+# Keep patches byte-exact. Line-ending conversion breaks `git apply`.
+*.patch -text
+*.diff -text
+
+# Source and data are text.
+*.cpp   text
+*.h     text
+*.sql   text
+*.lua   text
+*.toc   text
+*.md    text
+*.dist  text
+*.conf  text
