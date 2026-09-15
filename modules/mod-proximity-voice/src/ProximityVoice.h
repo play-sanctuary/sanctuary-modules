@@ -61,6 +61,21 @@ namespace ProximityVoice
         uint16 ClientPort = 7789;
     };
 
+    /// One language a character knows, and how well. 100 is fluent; anything less
+    /// means the voice server lets only that share of the words through clearly.
+    struct KnownLanguage
+    {
+        uint32 language = 0;
+        uint8 proficiency = 100;
+
+        bool operator==(KnownLanguage const& other) const
+        {
+            return language == other.language && proficiency == other.proficiency;
+        }
+
+        bool operator!=(KnownLanguage const& other) const { return !(*this == other); }
+    };
+
     /// Everything the voice server needs to know about one online character.
     struct Session
     {
@@ -77,7 +92,7 @@ namespace ProximityVoice
 
         /// Language this character's voice is carried in.
         uint32 voiceLanguage = LANG_UNIVERSAL;
-        std::vector<uint32> knownLanguages;
+        std::vector<KnownLanguage> knownLanguages;
 
         float range = 25.0f;
         bool muted = false;
@@ -85,6 +100,17 @@ namespace ProximityVoice
         /// Whether the companion app is currently attached to this character.
         bool clientConnected = false;
         bool speaking = false;
+
+        /*
+         * Who was told about this character's last utterance, and when.
+         *
+         * The addon holds a speaker's nameplate while they fight, and the only people to
+         * tell about that fight are the ones who were told about the speech. That audience
+         * is the voice server's per-utterance answer to "who was in earshot", which nothing
+         * here can reproduce - so it is kept from the last SPEAK rather than recomputed.
+         */
+        std::vector<ObjectGuid> lastAudience;
+        uint32 lastSpokeMs = 0;
 
         /*
          * State changed while the character could not be sent to.
@@ -135,6 +161,8 @@ namespace ProximityVoice
         void OnLogout(Player* player);
         void OnLanguagesChanged(Player* player);
         void OnWorldChanged(Player* player);
+        /// Tells whoever heard this character recently that they are, or are no longer, fighting.
+        void OnCombatChanged(Player* player, bool inCombat);
 
         // --- player-facing operations, all validated here ------------------
         /// Clamps to the configured range window. Returns the value actually applied.
@@ -215,6 +243,7 @@ namespace ProximityVoice
         std::string GenerateUniqueToken() const;
 
         void SendAddonUpdate(Player* player);
+        void PushCombatState(Player* player, Session& session, bool inCombat);
 
         ModuleConfig _config;
         std::unique_ptr<Bridge> _bridge;
@@ -234,7 +263,15 @@ namespace ProximityVoice
     /// The language a character speaks by default, from their race.
     uint32 GetRacialLanguage(uint8 race);
     /// Every language this character may speak, including LANG_UNIVERSAL for GMs.
-    std::vector<uint32> CollectKnownLanguages(Player* player);
+    std::vector<KnownLanguage> CollectKnownLanguages(Player* player);
+
+    /// How much of a language a character understands, 0-100: the language skill's
+    /// value out of 300, or 100 wherever the barrier never applied (universal, game
+    /// masters, comprehension auras).
+    uint8 LanguageProficiency(Player* player, uint32 language);
+
+    /// Whether a skill id is one of the language skills.
+    bool IsLanguageSkill(uint32 skillId);
     /// Whether this character has learned the given language.
     bool KnowsLanguage(Player* player, uint32 language);
     /// Human-readable name, for command output.

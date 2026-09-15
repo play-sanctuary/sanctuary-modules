@@ -54,6 +54,14 @@ namespace SanctuaryLawman
 
     /// Whether this character is currently shackled by somebody.
     bool IsShackled(Player const* player);
+
+    /// Whether this search would be allowed, without doing it. Returns the refusal, or
+    /// null if it would go ahead. The addon asks this to decide whether to offer a button.
+    char const* SearchRefusal(Player* searcher, Player* prisoner);
+
+    /// Reads a prisoner's pack out to the searcher. Returns the refusal, or null if the
+    /// search happened. Every rule lives here so the gloves and the addon's button agree.
+    char const* Search(Player* searcher, Player* prisoner);
 }
 
 #endif // SANCTUARY_LAWMAN_H

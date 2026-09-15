@@ -64,8 +64,12 @@ public:
             PLAYERHOOK_ON_LOGIN,
             PLAYERHOOK_ON_LOGOUT,
             PLAYERHOOK_ON_LEARN_SPELL,
+            PLAYERHOOK_ON_SET_SKILL,
+            PLAYERHOOK_ON_UPDATE_SKILL,
             PLAYERHOOK_ON_MAP_CHANGED,
             PLAYERHOOK_ON_UPDATE_ZONE,
+            PLAYERHOOK_ON_PLAYER_ENTER_COMBAT,
+            PLAYERHOOK_ON_PLAYER_LEAVE_COMBAT,
             // Addon traffic is a whisper to self, so it is the private-chat overload.
             PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT
         }) { }
@@ -96,6 +100,21 @@ public:
             sProximityVoice->OnLanguagesChanged(player);
     }
 
+    // A language skill set or raised - .voice teach, .setskill, or anything that ever
+    // trains one - changes how much of it the character understands. The core fires
+    // these after the value is written, so what the manager reads is the new one.
+    void OnPlayerSetSkill(Player* player, uint32 skillId, uint32 /*value*/, uint32 /*max*/, uint32 /*step*/, uint32 /*newValue*/) override
+    {
+        if (ProximityVoice::IsLanguageSkill(skillId))
+            sProximityVoice->OnLanguagesChanged(player);
+    }
+
+    void OnPlayerUpdateSkill(Player* player, uint32 skillId, uint32 /*value*/, uint32 /*max*/, uint32 /*step*/, uint32 /*newValue*/) override
+    {
+        if (ProximityVoice::IsLanguageSkill(skillId))
+            sProximityVoice->OnLanguagesChanged(player);
+    }
+
     void OnPlayerMapChanged(Player* player) override
     {
         sProximityVoice->OnWorldChanged(player);
@@ -104,6 +123,18 @@ public:
     void OnPlayerUpdateZone(Player* player, uint32 /*newZone*/, uint32 /*newArea*/) override
     {
         sProximityVoice->OnWorldChanged(player);
+    }
+
+    // Whoever heard this character recently is told, so their addon can keep the plate
+    // through the fight. The manager decides whether anyone did.
+    void OnPlayerEnterCombat(Player* player, Unit* /*enemy*/) override
+    {
+        sProximityVoice->OnCombatChanged(player, true);
+    }
+
+    void OnPlayerLeaveCombat(Player* player) override
+    {
+        sProximityVoice->OnCombatChanged(player, false);
     }
 };
 

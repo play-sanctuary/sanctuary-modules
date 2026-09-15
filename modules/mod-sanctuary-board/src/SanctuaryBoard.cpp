@@ -873,15 +873,44 @@ public:
             uint32 const id = uint32(atoi(rest.c_str()));
 
             /*
-             * Scoped to the author in the statement itself, not checked beforehand.
+             * The author may take their own down; a moderator may take anyone's.
              *
-             * The id came from the client and a client can say anything; making the WHERE
-             * clause carry the ownership means a forged id deletes nothing rather than
-             * deleting somebody else's notice.
+             * The id came from the client and a client can say anything, so the row is
+             * read first and the decision made on what is actually there: a forged id
+             * finds nothing and deletes nothing, and an ordinary player naming somebody
+             * else's notice is refused. The gossip board has let moderators do this since
+             * the first version; the window simply never offered it.
              */
+            QueryResult row = CharacterDatabase.Query(
+                "SELECT `author_guid`, `category`, `body` FROM `character_board_posts` WHERE `id` = {}", id);
+
+            if (!row)
+                return false;
+
+            Field* fields = row->Fetch();
+            ObjectGuid::LowType const author = fields[0].Get<uint32>();
+            uint32 const category = fields[1].Get<uint32>();
+            std::string const body = fields[2].Get<std::string>();
+
+            if (author != me)
+            {
+                if (!IsModerator(player))
+                {
+                    LOG_WARN("module.sanctuaryboard", "{} asked to remove notice {}, which is not theirs.",
+                        player->GetName(), id);
+                    return false;
+                }
+
+                // Logged before the delete, with the body intact: once the row is gone this
+                // is the only remaining record of what was actually written, which is the
+                // thing any punishment has to rest on. Same line the gossip path writes.
+                LOG_INFO("module.sanctuaryboard",
+                    "MODERATION: {} removed notice {} by {} [{}] \"{}\"",
+                    player->GetName(), id, DescribeAuthor(author), CategoryName(category), body);
+            }
+
             CharacterDatabase.DirectExecute(
-                "DELETE FROM `character_board_posts` WHERE `id` = {} AND `author_guid` = {}",
-                id, me);
+                "DELETE FROM `character_board_posts` WHERE `id` = {}", id);
 
             SendBoard(player);
         }

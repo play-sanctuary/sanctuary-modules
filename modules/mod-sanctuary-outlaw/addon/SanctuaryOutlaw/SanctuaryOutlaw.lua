@@ -187,10 +187,11 @@ local function SavedOutlawAngle()
     if SanctuaryOutlawDB and SanctuaryOutlawDB.buttonAngle then
         return SanctuaryOutlawDB.buttonAngle
     end
-    -- The arc the four Sanctuary buttons sit in, measured off a live minimap rather than
-    -- guessed: outlaw -113.04, stash -132.70, disguise -151.64, profile -171.25. Roughly 19
+    -- The arc the Sanctuary buttons sit in, measured off a live minimap rather than
+    -- guessed: outlaw -113.04, lawman -132.01, disguise -151.64, profile -171.25. Roughly 19
     -- degrees apart, which is about 27px at this radius, so they sit against each other
-    -- without touching the stock tracking and clock buttons.
+    -- without touching the stock tracking and clock buttons. Faction is not on this arc;
+    -- it sits by itself at -17.59.
     return -113.04
 end
 
@@ -254,7 +255,7 @@ outlawButton:SetScript("OnEnter", function(self)
         GameTooltip:SetText("|cffff4040OUTLAW|r")
         GameTooltip:AddLine("Anyone may raise a hand to you, guards included.", 1, 1, 1, true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Click to stand down. Takes a minute, and is refused while fighting.", 0.6, 0.6, 0.6, true)
+        GameTooltip:AddLine("Click to stand down, takes a minute, and is refused while fighting.", 0.6, 0.6, 0.6, true)
     else
         GameTooltip:SetText("Lawful")
         GameTooltip:AddLine("Nobody of your own faction may strike you.", 1, 1, 1, true)

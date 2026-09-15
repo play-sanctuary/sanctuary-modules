@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Sanctuary Faction
+## Notes: The faction you belong to, who else is in it, and what your rank has taught you.
+## Author: Sanctuary
+## Version: 1.0
+## SavedVariablesPerCharacter: SanctuaryFactionDB
+
+SanctuaryFaction.lua

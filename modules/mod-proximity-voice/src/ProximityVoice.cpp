@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <random>
 #include <sstream>
+#include <unordered_set>
 
 namespace ProximityVoice
 {
@@ -38,14 +39,18 @@ namespace ProximityVoice
         /// Floor between addon-initiated syncs from one character.
         constexpr uint32 SyncCooldownMs = 1000;
 
-        std::string JoinLanguages(std::vector<uint32> const& languages)
+        // "1,7:40". Fluent is the common case and the only form anything older than
+        // partial knowledge parses, so the number is only appended when it means something.
+        std::string JoinLanguages(std::vector<KnownLanguage> const& languages)
         {
             std::string out;
-            for (uint32 language : languages)
+            for (KnownLanguage const& known : languages)
             {
                 if (!out.empty())
                     out += ',';
-                out += std::to_string(language);
+                out += std::to_string(known.language);
+                if (known.proficiency < 100)
+                    out += ':' + std::to_string(uint32(known.proficiency));
             }
             return out;
         }
@@ -320,7 +325,7 @@ namespace ProximityVoice
         if (!session)
             return;
 
-        std::vector<uint32> languages = CollectKnownLanguages(player);
+        std::vector<KnownLanguage> languages = CollectKnownLanguages(player);
         if (languages == session->knownLanguages)
             return;
 
@@ -779,6 +784,8 @@ namespace ProximityVoice
 
             // The voice server names the audience, because only it knows who was
             // actually in range and understood the speaker.
+            std::unordered_set<ObjectGuid> told;
+
             std::stringstream stream(record.GetString("to"));
             std::string item;
             while (std::getline(stream, item, ','))
@@ -804,7 +811,61 @@ namespace ProximityVoice
                     : session->name;
 
                 SendAddonPacket(target, header + label);
+
+                told.insert(listener);
             }
+
+            /*
+             * And every game master, whether or not they could hear it.
+             *
+             * The audience above is the voice server's answer to "who was in range and
+             * understood this", which is the right rule for players and the wrong one for
+             * moderation. A game master watching a scene from above, or standing far
+             * enough back not to be part of it, is exactly the person who needs to see who
+             * is talking - being out of earshot is usually the point of where they are
+             * standing.
+             *
+             * GM *mode*, not account rank: the same test the identity module uses. A game
+             * master playing with `.gm off` is a player and sees what players see.
+             *
+             * No range or map test. A speaker with no nameplate on the watcher's screen
+             * has nothing to draw on and the addon ignores it, so bounding it here would
+             * only invent a second and worse definition of "nearby" than the one the
+             * client already applies by having a plate at all.
+             */
+            for (auto const& [guid, watcher] : ObjectAccessor::GetPlayers())
+            {
+                if (!watcher || !watcher->IsInWorld() || !watcher->IsGameMaster())
+                    continue;
+
+                // Already covered as an ordinary listener. Telling them twice would have
+                // the addon restart the same speaker's expiry needlessly.
+                if (told.count(watcher->GetGUID()))
+                    continue;
+
+                // Still LabelFor rather than the real name: for a game master in GM mode
+                // it resolves to the real one anyway, and reaching around the identity
+                // module here would become a leak the moment that rule changes.
+                std::string const label = player
+                    ? SanctuaryIdentity::LabelFor(watcher, player)
+                    : session->name;
+
+                SendAddonPacket(watcher, header + label);
+            }
+
+            /*
+             * Remembered for combat. The addon keeps a speaker's plate while they fight,
+             * and the only people to tell are the ones who were just told about the
+             * speech - so the audience stays with the session, and when it last spoke.
+             */
+            session->lastAudience.assign(told.begin(), told.end());
+            session->lastSpokeMs = _clockMs;
+
+            // A speaker who falls silent mid-fight is not done being looked at. Sent with
+            // the stop rather than the start: the plate is on screen while they talk
+            // regardless, and it is the moment the speech ends that the hold must exist.
+            if (!speaking && player && player->IsInCombat())
+                PushCombatState(player, *session, true);
 
             return;
         }
@@ -867,6 +928,82 @@ namespace ProximityVoice
     }
 
     // --- addon channel -----------------------------------------------------
+
+    /*
+     * How recently a character must have spoken for their combat to be worth announcing.
+     *
+     * Entering: only a recent speaker has a plate anyone is holding, or could hold. "I'm
+     * coming!" and then the charge is the case this exists for; a character who spoke ten
+     * minutes ago and now fights across the zone is not. Leaving: wider, because the hold
+     * itself lasts up to three minutes on the client, and a release that never arrives is
+     * exactly what leaves a plate stuck.
+     */
+    static constexpr uint32 COMBAT_ENTER_WINDOW_MS = 30 * 1000;
+    static constexpr uint32 COMBAT_LEAVE_WINDOW_MS = 5 * 60 * 1000;
+
+    void Manager::OnCombatChanged(Player* player, bool inCombat)
+    {
+        if (!player)
+            return;
+
+        Session* session = FindSessionMutable(player->GetGUID());
+
+        // Nobody has heard them, so nobody is holding a plate for them.
+        if (!session || session->lastAudience.empty())
+            return;
+
+        uint32 const window = inCombat ? COMBAT_ENTER_WINDOW_MS : COMBAT_LEAVE_WINDOW_MS;
+
+        if (_clockMs - session->lastSpokeMs > window)
+            return;
+
+        PushCombatState(player, *session, inCombat);
+    }
+
+    /*
+     * Tells the people who heard a character last that they are, or are no longer, fighting.
+     *
+     * A plate the addon showed because its owner spoke is taken back when the speech ends.
+     * That is right in a conversation and wrong in a fight: the plate goes just as it
+     * starts to matter, and the client cannot see another character's combat state at all -
+     * a 3.3.5a nameplate carries no unit token to ask about. So it is told from here, and
+     * holds the plate until the fight is over.
+     *
+     * Same audience as the speech, same labelling. Each listener gets the name they were
+     * shown, or the disguise kept on every other message would leak on this one.
+     */
+    void Manager::PushCombatState(Player* player, Session& session, bool inCombat)
+    {
+        if (!player)
+            return;
+
+        std::string const header = "CMB " + std::to_string(session.guid.GetRawValue()) +
+            " " + (inCombat ? "1" : "0") + " ";
+
+        std::unordered_set<ObjectGuid> told;
+
+        for (ObjectGuid const& listener : session.lastAudience)
+        {
+            Player* target = ObjectAccessor::FindConnectedPlayer(listener);
+            if (!target)
+                continue;
+
+            SendAddonPacket(target, header + SanctuaryIdentity::LabelFor(target, player));
+            told.insert(listener);
+        }
+
+        // Game masters, as with speech: whether or not they were in earshot.
+        for (auto const& [guid, watcher] : ObjectAccessor::GetPlayers())
+        {
+            if (!watcher || !watcher->IsInWorld() || !watcher->IsGameMaster())
+                continue;
+
+            if (told.count(watcher->GetGUID()))
+                continue;
+
+            SendAddonPacket(watcher, header + SanctuaryIdentity::LabelFor(watcher, player));
+        }
+    }
 
     void Manager::SendAddonUpdate(Player* player)
     {

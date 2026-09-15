@@ -58,3 +58,22 @@ SanctuaryGM.Addon.Prefix = "SGM"
 #
 
 SanctuaryGM.Sound.DefaultRadius = 40.0
+
+#
+#    SanctuaryGM.GuiOnlyCommands
+#        Description: Refuses the TYPED form of the commands that have a window, so the
+#                     windows are the way in rather than one of two ways. Buttons are
+#                     unaffected: an addon sends its command down a channel the server can
+#                     tell apart from a keyboard.
+#
+#                     Game masters and the console are exempt, so turning this on changes
+#                     nothing you will see while testing as one - log in as an ordinary
+#                     character to watch it work.
+#
+#                     Not a security measure. Every one of those commands still checks its
+#                     own rules when it runs; this only decides which door they come
+#                     through. 0 puts the keyboard back for everybody.
+#        Default:     1 - windows only
+#
+
+SanctuaryGM.GuiOnlyCommands = 1

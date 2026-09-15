@@ -5,9 +5,10 @@ adjustable speaking distance, and the game's own language barrier applied to
 speech.
 
 Stand next to someone and you hear them clearly. Walk away and they fade out.
-Speak Orcish at a Human who never learned it and they hear a person talking —
-volume, rhythm, pauses, emphasis — without a single intelligible word, exactly
-as they would see garbled text in `/say`.
+Speak Orcish at a Human who never learned it and they hear your voice through a
+wall — pitch, rhythm, pauses, emphasis — without a single intelligible word,
+exactly as they would see garbled text in `/say`. A Human who half learned it
+hears half the words.
 
 ---
 
@@ -132,12 +133,24 @@ A character speaks one language at a time, chosen in the client or with
 the module checks the same skill the chat handler does, including Comprehend
 Language effects.
 
-When a listener does not know that language, the server **does not send them the
-speech**. It sends four loudness bytes per 20 ms frame, and the listener's client
-synthesises a voice from them: same rhythm, same emphasis, same volume, a
-different speaker every time, and a distinct accent per language. Nothing
-intelligible crosses the network, so there is no client setting or patch that
-can turn it back into words.
+When a listener does not know that language, the voice server **does not send
+them the speech**. It sends the speaker's voice the way the adults sound in
+Peanuts instead: decoded on the relay, put through a resonance that swings with
+each syllable and a lowpass at 340 Hz behind it, and re-encoded, so the pitch,
+rhythm and tone come through and the consonants that carry the words do not.
+Nothing above the cutoff ever leaves the relay, so there is no client setting,
+patch or recording that can turn it back into words. (The relay's `synth` mode sends a four-byte
+loudness envelope instead, which the launcher turns into a wholly synthetic
+voice; it is the fallback for any frame the relay cannot decode.)
+
+Knowledge can be partial. A language's skill value out of 300 is how much of it
+a character understands: the relay cuts speech into words at the dips in its
+loudness and lets each one through clear or muffled by a roll against that
+share, so someone at 40% catches a few words and someone at 70% catches those
+and more. The game learns every language at 300, so nothing changes until a game
+master lowers one with `.voice teach <language> <percent>` (or `.setskill` on
+the language's skill); the skill hooks push the change to the relay at once.
+Text chat has no half measure and keeps treating any skill as fluent.
 
 Game masters hear everything and are heard by everyone
 (`ProximityVoice.Language.GameMastersUnderstandAll`).
@@ -158,7 +171,8 @@ their voices among the dead.
 | `.voice` / `.voice status` | players | current distance, language, mute and client state |
 | `.voice range <yards>` | players | change speaking distance (clamped to the realm's window) |
 | `.voice lang <name>` | players | change the language you speak |
-| `.voice langs` | players | list the languages you have learned |
+| `.voice langs` | players | list the languages you have learned, with how much of each |
+| `.voice teach <language> <percent>` | GM | set how much of a language the selected player (or you) understands |
 | `.voice token` | players | issue a fresh login code |
 | `.voice mute` / `.voice unmute` | players | mute the microphone from in game |
 | `.voice info` | GM | bridge state, tracked sessions, realm settings |

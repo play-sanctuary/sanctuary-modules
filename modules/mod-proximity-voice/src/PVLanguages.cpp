@@ -177,9 +177,54 @@ namespace ProximityVoice
         return false;
     }
 
-    std::vector<uint32> CollectKnownLanguages(Player* player)
+    uint8 LanguageProficiency(Player* player, uint32 language)
     {
-        std::vector<uint32> known;
+        if (!player)
+            return 0;
+
+        if (language == LANG_UNIVERSAL || player->IsGameMaster())
+            return 100;
+
+        LanguageDesc const* desc = GetLanguageDescByID(language);
+        if (!desc)
+            return 0;
+
+        if (desc->skill_id == 0)
+            return 100;
+
+        for (auto const& auraEffect : player->GetAuraEffectsByType(SPELL_AURA_COMPREHEND_LANGUAGE))
+            if (auraEffect->GetMiscValue() == int32(language))
+                return 100;
+
+        if (!player->HasSkill(desc->skill_id))
+            return 0;
+
+        /*
+         * The skill value is the measure. The game learns every language at 300 of 300,
+         * so nothing changes for anyone until a game master sets one lower - .voice
+         * teach, or .setskill on the language's skill - at which point the voice server
+         * lets that share of the words through and the rest arrive as a voice through a
+         * wall. Text chat has no half measure and keeps treating any skill as fluent.
+         */
+        uint32 const value = player->GetSkillValue(desc->skill_id);
+        return uint8(std::min<uint32>(100, value * 100 / 300));
+    }
+
+    bool IsLanguageSkill(uint32 skillId)
+    {
+        if (!skillId)
+            return false;
+
+        for (LanguageDesc const& desc : lang_description)
+            if (desc.skill_id == skillId)
+                return true;
+
+        return false;
+    }
+
+    std::vector<KnownLanguage> CollectKnownLanguages(Player* player)
+    {
+        std::vector<KnownLanguage> known;
         if (!player)
             return known;
 
@@ -189,12 +234,12 @@ namespace ProximityVoice
                 continue;
 
             if (KnowsLanguage(player, language))
-                known.push_back(language);
+                known.push_back({ language, LanguageProficiency(player, language) });
         }
 
         // A game master is understood by, and understands, everyone.
         if (player->IsGameMaster())
-            known.push_back(LANG_UNIVERSAL);
+            known.push_back({ LANG_UNIVERSAL, 100 });
 
         return known;
     }

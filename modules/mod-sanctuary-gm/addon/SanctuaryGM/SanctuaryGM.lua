@@ -14,6 +14,58 @@
     /gm to open.
 ]]
 
+--[[
+    The Timekeeper, the game masters' class (SanctuaryGmClass.cpp).
+
+    The client learns the class itself from the patch, but the interface's tables of class
+    colours and icons were written for ten classes, and stock frames index them without
+    looking - the battleground scoreboard among them. Registered here, at load, because
+    this addon runs for everybody and anybody may meet a game master. The token must match
+    GM_CLASS_TOKEN in tools/assets/make-patch.py; the icon is the Paladin's, which the
+    class row was cloned from.
+]]
+RAID_CLASS_COLORS.TIMEKEEPER = RAID_CLASS_COLORS.TIMEKEEPER or { r = 0.0, g = 1.0, b = 0.59 }
+CLASS_ICON_TCOORDS.TIMEKEEPER = CLASS_ICON_TCOORDS.TIMEKEEPER or { 0, 0.25, 0.5, 0.75 }
+
+--[[
+    Talents and glyphs, for a class that has neither.
+
+    Blizzard's talent frame assumes the player's class has talent trees. A Timekeeper has
+    none, so the frame errors while opening - and then its hotkey no longer closes it,
+    because the error happens before the toggle reaches HideUIPanel. The window is left
+    stuck until its X is clicked.
+
+    So the frame is not opened at all. The test is the trees, not the class: any class with
+    no talent trees gets the same answer, and if Timekeepers are ever given trees these
+    stop refusing on their own. Glyphs go with them - they are a tab of the same frame and
+    are chosen against talents.
+]]
+local function SanctuaryNoTalentTrees()
+    return (GetNumTalentTabs() or 0) == 0
+end
+
+local function SanctuaryRefuseTalents(what)
+    DEFAULT_CHAT_FRAME:AddMessage("|cffd8b46aSanctuary:|r your class has no " .. what .. ".")
+end
+
+local SanctuaryToggleTalentFrame = ToggleTalentFrame
+ToggleTalentFrame = function(...)
+    if SanctuaryNoTalentTrees() then return SanctuaryRefuseTalents("talents") end
+    return SanctuaryToggleTalentFrame(...)
+end
+
+local SanctuaryToggleGlyphFrame = ToggleGlyphFrame
+ToggleGlyphFrame = function(...)
+    if SanctuaryNoTalentTrees() then return SanctuaryRefuseTalents("glyphs") end
+    return SanctuaryToggleGlyphFrame(...)
+end
+
+local SanctuaryOpenGlyphFrame = OpenGlyphFrame
+OpenGlyphFrame = function(...)
+    if SanctuaryNoTalentTrees() then return SanctuaryRefuseTalents("glyphs") end
+    return SanctuaryOpenGlyphFrame(...)
+end
+
 local ADDON_PREFIX = "SGM"
 
 local state = {
@@ -91,6 +143,20 @@ subtitle:SetText("Connecting...")
 local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
 close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -6)
 
+--[[
+    Closing the panel tells the server, which takes back the placement spell.
+
+    On OnHide rather than on the close button, because there are four ways out - the button,
+    Escape (the panel is in UISpecialFrames), /gm again, and a DENY - and the spell should
+    not be left in the spellbook by any of them. The guard is for the Hide() on the line
+    above, which runs while the addon is still loading and has nobody to talk to.
+]]
+panel:SetScript("OnHide", function()
+    if state.ready then
+        Send("BYE")
+    end
+end)
+
 --------------------------------------------------------------------------
 -- Tabs
 --------------------------------------------------------------------------
@@ -106,6 +172,19 @@ local TABS = {
 local tabButtons = {}
 local pages = {}
 
+-- The tabs that put things down, and so the only ones with a placement to undo.
+local PLACING = { creature = true, object = true }
+
+-- The tabs with something to look at before committing to it.
+local PREVIEWING = { creature = true, object = true, morph = true }
+
+-- Built at the end of the file, but ShowMode has to reach it; see "Undo" below.
+local undo
+
+-- The preview flyout, built below the tabs and reached by the three tabs above.
+local preview
+local PreviewObject, PreviewCreature, PreviewCreatureEntry, PreviewNothing
+
 local function ShowMode(mode)
     state.mode = mode
 
@@ -120,6 +199,17 @@ local function ShowMode(mode)
     end
 
     pages[mode]:Show()
+
+    if undo then
+        if PLACING[mode] then undo:Show() else undo:Hide() end
+    end
+
+    if preview then
+        if PREVIEWING[mode] then preview:Show() else preview:Hide() end
+
+        -- Whatever was being looked at belongs to the tab that was left.
+        PreviewNothing()
+    end
 end
 
 for index, tab in ipairs(TABS) do
@@ -141,6 +231,265 @@ for index, tab in ipairs(TABS) do
 end
 
 --------------------------------------------------------------------------
+-- Preview, for the Objects and Morph tabs
+--------------------------------------------------------------------------
+
+--[[
+    Seeing the thing before committing to it: an object before it is put in the world, a
+    display id before somebody is turned into it.
+
+    It hangs off the side of the panel rather than living on the pages. The panel is 420
+    wide and the result rows are 378 of that, so there is no room beside a list - and a
+    preview that pushed the list narrower would cost every tab something to serve two.
+
+    THE TWO HALVES ARE NOT ALIKE.
+
+    A creature display needs nothing from the server: a Model frame takes a display id
+    directly through SetCreature, and the Morph tab is given one by whoever is typing.
+    (SetDisplayInfo, which later clients use for this, does not exist in 3.3.5 - the string
+    is not in the executable. SetCreature is what this client has.)
+
+    An object has no such call. Its model is a FILE, named in GameObjectDisplayInfo.dbc,
+    which an addon cannot read - so the server is asked for the path and SetModel is handed
+    the answer. The file itself is already in the client; only its name crosses the wire.
+]]
+do
+    preview = CreateFrame("Frame", "SanctuaryGMPreview", panel)
+    preview:SetWidth(210)
+    preview:SetHeight(260)
+    preview:SetPoint("TOPLEFT", panel, "TOPRIGHT", 6, -52)
+    preview:SetBackdrop(BACKDROP)
+    preview:SetBackdropColor(0, 0, 0, 0.92)
+    preview:Hide()
+
+    local title = preview:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    title:SetPoint("TOPLEFT", preview, "TOPLEFT", 14, -14)
+    title:SetText("|cffd8b46aPreview|r")
+
+    local hint = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("TOPRIGHT", preview, "TOPRIGHT", -14, -14)
+    hint:SetText("drag to turn, scroll to zoom")
+
+    local caption = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    caption:SetPoint("BOTTOMLEFT", preview, "BOTTOMLEFT", 14, 12)
+    caption:SetWidth(182)
+    caption:SetJustifyH("LEFT")
+
+    local model = CreateFrame("PlayerModel", nil, preview)
+    model:SetPoint("TOPLEFT", preview, "TOPLEFT", 12, -32)
+    model:SetPoint("BOTTOMRIGHT", preview, "BOTTOMRIGHT", -12, 30)
+
+    -- Turning slowly on its own, because one fixed angle hides as much as it shows - and
+    -- draggable, because the angle you want is never the one it stopped at.
+    local facing = 0
+    local dragging, dragFrom = false, 0
+
+    model:EnableMouse(true)
+
+    model:SetScript("OnMouseDown", function()
+        dragging = true
+        dragFrom = ({ GetCursorPosition() })[1]
+    end)
+
+    model:SetScript("OnMouseUp", function() dragging = false end)
+
+    model:SetScript("OnUpdate", function(self, elapsed)
+        if dragging then
+            local x = ({ GetCursorPosition() })[1]
+            facing = facing + ((x - dragFrom) * 0.02)
+            dragFrom = x
+        else
+            facing = facing + ((elapsed or 0) * 0.5)
+        end
+
+        self:SetRotation(facing)
+    end)
+
+    --[[
+        Zooming, on the wheel.
+
+        The client frames a model for itself and its idea of the right distance is built
+        for a humanoid, so a kobold is a speck and a boat fills the frame before you can
+        tell which boat. SetModelScale is the zoom this client has - there is no
+        SetCameraDistance in 3.3.5 - and it is re-applied after every draw, because setting
+        a new model resets it.
+
+        The bounds are wide on purpose: 0.1 is what a gunship needs and 10 is what a rat
+        does. It is kept across subjects rather than reset, so walking a list at one zoom
+        level compares like with like.
+    ]]
+    local ZOOM_MIN, ZOOM_MAX = 0.1, 10.0
+    local zoom = 1.0
+
+    local function ApplyZoom()
+        pcall(model.SetModelScale, model, zoom)
+    end
+
+    model:EnableMouseWheel(true)
+
+    model:SetScript("OnMouseWheel", function(_, delta)
+        -- A step in proportion to where it is, so the wheel feels the same at either end.
+        zoom = zoom * ((delta or 0) > 0 and 1.2 or (1 / 1.2))
+        zoom = math.max(ZOOM_MIN, math.min(ZOOM_MAX, zoom))
+        ApplyZoom()
+    end)
+
+    --[[
+        What the panel is pointed at, and what the server has told us about it.
+
+        `wanted` is a string rather than a number because three kinds of thing can be shown
+        and they are not interchangeable: display 328 and creature 328 are different
+        previews. An answer is painted only if it still matches, since it arrives a round
+        trip after the cursor has usually moved on.
+
+        Both caches keep a `false` for "asked, and there is nothing to draw", so a bad entry
+        is asked about once rather than on every pass of the mouse.
+    ]]
+    local wanted
+    local objectPaths = {}
+    local creatureDisplays = {}
+
+    local function Draw(setter, argument, description)
+        model:ClearModel()
+
+        -- Guarded because these are numbers somebody typed and paths somebody else owns.
+        -- A model the client cannot draw leaves the frame empty rather than erroring.
+        local ok = pcall(setter, model, argument)
+        ApplyZoom()
+
+        caption:SetText(ok and description or ("|cffff8800" .. description .. " cannot be drawn.|r"))
+    end
+
+    --[[
+        Hovering asks after a moment, not instantly.
+
+        Running a mouse down a list of twelve rows on the way to the thirteenth should not
+        send twelve requests, so a row asks only once the cursor has settled on it. The
+        delay is on the preview rather than the rows because there is one of these and
+        twelve of those - twice over, now that creatures have them as well.
+    ]]
+    local HOVER_DELAY = 0.25
+    local hoverKind, hoverEntry, hoverFor
+
+    preview:SetScript("OnUpdate", function(_, elapsed)
+        if not hoverEntry then
+            return
+        end
+
+        hoverFor = hoverFor + (elapsed or 0)
+
+        if hoverFor >= HOVER_DELAY then
+            local kind, entry = hoverKind, hoverEntry
+            hoverKind, hoverEntry = nil, nil
+
+            if kind == "creature" then
+                PreviewCreatureEntry(entry)
+            else
+                PreviewObject(entry)
+            end
+        end
+    end)
+
+    function PreviewNothing()
+        wanted, hoverKind, hoverEntry = nil, nil, nil
+        model:ClearModel()
+        caption:SetText("")
+    end
+
+    -- A display id straight from the Morph box: the client needs no help with these.
+    function PreviewCreature(displayId)
+        hoverKind, hoverEntry = nil, nil
+
+        if not displayId or displayId <= 0 then
+            PreviewNothing()
+            return
+        end
+
+        wanted = "display " .. displayId
+        Draw(model.SetCreature, displayId, "Display " .. displayId)
+    end
+
+    -- A creature entry from a search row, which only the server can turn into a display.
+    function PreviewCreatureEntry(entry)
+        if not entry or entry <= 0 then
+            PreviewNothing()
+            return
+        end
+
+        wanted = "creature " .. entry
+        local displayId = creatureDisplays[entry]
+
+        if displayId == nil then
+            caption:SetText("Creature " .. entry .. "...")
+            Send("CMODEL " .. entry)
+            return
+        end
+
+        if displayId == false then
+            model:ClearModel()
+            caption:SetText("|cffff8800Creature " .. entry .. " has no model to show.|r")
+            return
+        end
+
+        Draw(model.SetCreature, displayId,
+            "Creature " .. entry .. " |cff9c9081(display " .. displayId .. ")|r")
+    end
+
+    function PreviewObject(entry)
+        if not entry or entry <= 0 then
+            PreviewNothing()
+            return
+        end
+
+        wanted = "object " .. entry
+        local path = objectPaths[entry]
+
+        if path == nil then
+            caption:SetText("Object " .. entry .. "...")
+            Send("GMODEL " .. entry)
+            return
+        end
+
+        if path == false then
+            model:ClearModel()
+            caption:SetText("|cffff8800Object " .. entry .. " has no model to show.|r")
+            return
+        end
+
+        Draw(model.SetModel, path, "Object " .. entry)
+    end
+
+    --[[ The server's answers. Painted only if they are still what is wanted. ]]
+    function preview.OnModelPath(entry, path)
+        objectPaths[entry] = path or false
+
+        if wanted == "object " .. entry then
+            PreviewObject(entry)
+        end
+    end
+
+    function preview.OnCreatureDisplay(entry, displayId)
+        creatureDisplays[entry] = (displayId and displayId > 0) and displayId or false
+
+        if wanted == "creature " .. entry then
+            PreviewCreatureEntry(entry)
+        end
+    end
+
+    function preview.HoverObject(entry)
+        hoverKind, hoverEntry, hoverFor = "object", entry, 0
+    end
+
+    function preview.HoverCreature(entry)
+        hoverKind, hoverEntry, hoverFor = "creature", entry, 0
+    end
+
+    function preview.EndHover()
+        hoverKind, hoverEntry = nil, nil
+    end
+end
+
+--------------------------------------------------------------------------
 -- Shared results list, used by the creature and object tabs
 --------------------------------------------------------------------------
 
@@ -148,7 +497,10 @@ local RESULT_ROWS = 12
 local resultButtons = {}
 
 local function BuildSearchPage(page, placeholder, searchVerb, spawnVerb)
-    local box = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
+    -- Named: InputBoxTemplate's middle texture anchors to $parentLeft and
+    -- $parentRight, which resolve to nothing on an anonymous frame - leaving
+    -- the box drawn as two end caps with a gap.
+    local box = CreateFrame("EditBox", "SanctuaryGMInputBox1", page, "InputBoxTemplate")
     box:SetWidth(250)
     box:SetHeight(22)
     box:SetPoint("TOPLEFT", page, "TOPLEFT", 6, 0)
@@ -195,13 +547,126 @@ local function BuildSearchPage(page, placeholder, searchVerb, spawnVerb)
     permanentLabel:SetPoint("LEFT", permanent, "RIGHT", 2, 0)
     permanentLabel:SetText("Save to the database (permanent)")
 
+    --[[
+        Removing what you are standing at.
+
+        NEAREST IS THE SELECTION, because there is no other. The client cannot target a
+        gameobject - there is no unit frame for a door - so the core's own `.gobject delete`
+        works from a guid remembered by an earlier `.gobject target`, which is two commands
+        and something to keep track of. Standing next to the thing is the gesture people
+        actually use.
+
+        Only on the object page, and only for objects: a stray click here should not be able
+        to remove a creature.
+    ]]
+    if spawnVerb == "GSPAWN" then
+        local remove = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
+        remove:SetWidth(150)
+        remove:SetHeight(22)
+        remove:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 6, 38)
+
+        --[[
+            Removing by pointing at it, which is the other half of placing by pointing.
+
+            The same reticle and the same spell: the server is told beforehand whether the
+            next cast is putting something down or taking something away. A second ground
+            targeted spell would have meant a second client patch for a difference the
+            server already knows.
+
+            The mode stays on afterwards, so clearing several objects is one press and then
+            a click each.
+        ]]
+        --[[
+            One press, not two.
+
+            This button both tells the server the next cast is a removal AND starts the
+            reticle, which is why it is a secure button of its own rather than something
+            that arms the Place button. PreClick is the piece that makes it possible: it
+            runs BEFORE the secure action, is not itself protected, and so can send the
+            addon message that sets the mode while the cast that follows opens the reticle.
+
+            There is no race. The message goes out first, and the cast does not LAND until
+            the ground is clicked - which is a person's reaction time later, not a packet's.
+        ]]
+        local removeAt = CreateFrame("Button", "SanctuaryGMDeleteAtButton", page,
+            "SecureActionButtonTemplate,UIPanelButtonTemplate")
+        removeAt:SetWidth(150)
+        removeAt:SetHeight(22)
+        removeAt:SetPoint("BOTTOMLEFT", remove, "BOTTOMRIGHT", 8, 0)
+        removeAt:SetText("Delete where I click")
+        removeAt:RegisterForClicks("LeftButtonUp")
+        removeAt:SetAttribute("type", "spell")
+        removeAt:SetAttribute("spell", "Place Object")
+        removeAt:SetScript("PreClick", function() Send("GPENDING 0 0 1") end)
+
+        removeAt:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetText("Delete where I click")
+            GameTooltip:AddLine("Press this, then click an object. It stays on, so several "
+                .. "can be cleared one after another - press it again for each.", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+
+        removeAt:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        remove:SetText("Delete nearest")
+        remove:SetScript("OnClick", function() Send("GDELETE") end)
+
+        remove:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetText("Delete the nearest object")
+            GameTooltip:AddLine("Within ten yards. A saved object is removed from the "
+                .. "database too, so it stays gone after a restart.", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+
+        remove:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
     local rows = {}
 
     for i = 1, RESULT_ROWS do
-        local row = CreateFrame("Button", nil, page)
+        --[[
+            A result row IS the placement gesture: click it and the reticle opens.
+
+            It has to be a secure button, because casting is protected and a reticle can
+            only be opened by casting. PreClick does the rest - it runs before the secure
+            action and is not itself protected, so it can tell the server WHAT is being
+            placed while the cast that follows asks the player WHERE.
+
+            The choice sticks afterwards, so the same thing can be put down again and
+            again. Right-clicking a row is how you stop.
+        ]]
+        local row = CreateFrame("Button", nil, page, "SecureActionButtonTemplate")
         row:SetWidth(378)
         row:SetHeight(18)
         row:SetPoint("TOPLEFT", permanent, "BOTTOMLEFT", 2, -6 - ((i - 1) * 19))
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row:SetAttribute("type", "spell")
+        row:SetAttribute("spell", "Place Object")
+
+        row:SetScript("PreClick", function(self, button)
+            if not self.entry then
+                return
+            end
+
+            -- Right-click gives this one up. The attribute is cleared for the duration of
+            -- the click so the secure half casts nothing, and restored in PostClick.
+            if button == "RightButton" then
+                self:SetAttribute("spell", nil)
+                Send("GPENDING 0 0 0 0")
+                return
+            end
+
+            Send(string.format("GPENDING %d %d 0 %d", self.entry,
+                state.permanent and 1 or 0, spawnVerb == "CSPAWN" and 1 or 0))
+        end)
+
+        row:SetScript("PostClick", function(self, button)
+            if button == "RightButton" then
+                self:SetAttribute("spell", "Place Object")
+                SpellStopTargeting()
+            end
+        end)
 
         row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.text:SetPoint("LEFT", row, "LEFT", 2, 0)
@@ -209,14 +674,6 @@ local function BuildSearchPage(page, placeholder, searchVerb, spawnVerb)
         row.text:SetWidth(374)
 
         row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-
-        row:SetScript("OnClick", function(self)
-            if not self.entry then
-                return
-            end
-
-            Send(string.format("%s %d %d", spawnVerb, self.entry, state.permanent and 1 or 0))
-        end)
 
         row:Hide()
         rows[i] = row
@@ -227,6 +684,26 @@ end
 
 resultButtons.creature = BuildSearchPage(pages.creature, "Creature name or id", "CSEARCH", "CSPAWN")
 resultButtons.object = BuildSearchPage(pages.object, "Object name or id", "GSEARCH", "GSPAWN")
+
+--[[
+    Hovering a row shows what it is.
+
+    Hovering, rather than clicking: a click on these rows spawns or places the thing, so
+    looking would otherwise mean committing first. Attached here rather than inside
+    BuildSearchPage because the two lists ask different questions - an object is drawn from
+    a file path, a creature from a display id - and the row only knows its entry.
+]]
+for kind, ask in pairs({ creature = preview.HoverCreature, object = preview.HoverObject }) do
+    for _, row in ipairs(resultButtons[kind]) do
+        row:SetScript("OnEnter", function(self)
+            if self.entry then
+                ask(self.entry)
+            end
+        end)
+
+        row:SetScript("OnLeave", function() preview.EndHover() end)
+    end
+end
 
 --------------------------------------------------------------------------
 -- Spells
@@ -247,7 +724,10 @@ local RenderRows
 do
     local page = pages.spell
 
-    local box = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
+    -- Named: InputBoxTemplate's middle texture anchors to $parentLeft and
+    -- $parentRight, which resolve to nothing on an anonymous frame - leaving
+    -- the box drawn as two end caps with a gap.
+    local box = CreateFrame("EditBox", "SanctuaryGMInputBox2", page, "InputBoxTemplate")
     box:SetWidth(250)
     box:SetHeight(22)
     box:SetPoint("TOPLEFT", page, "TOPLEFT", 6, 0)
@@ -315,12 +795,38 @@ do
         row:SetHeight(18)
         row:SetPoint("TOPLEFT", onTarget, "BOTTOMLEFT", 2, -6 - ((i - 1) * 19))
 
+        --[[
+            The spell's own icon, and its own tooltip.
+
+            Both are read from the client rather than sent over the wire: GetSpellInfo takes
+            the icon out of the client's Spell.dbc, and SetHyperlink("spell:id") shows the
+            same tooltip the spellbook does - description, range, cost, cast time. Sending
+            any of that from the server would be a second copy to keep in step, and it would
+            be the copy nobody looks at that drifted.
+        ]]
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetWidth(16)
+        row.icon:SetHeight(16)
+        row.icon:SetPoint("LEFT", row, "LEFT", 2, 0)
+
         row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.text:SetPoint("LEFT", row, "LEFT", 2, 0)
+        row.text:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
         row.text:SetJustifyH("LEFT")
-        row.text:SetWidth(374)
+        row.text:SetWidth(354)
 
         row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+
+        row:SetScript("OnEnter", function(self)
+            if not self.entry then
+                return
+            end
+
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink("spell:" .. self.entry)
+            GameTooltip:Show()
+        end)
+
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
         row:SetScript("OnClick", function(self)
             if not self.entry then
@@ -380,6 +886,16 @@ RenderRows = function()
         if data then
             rows[i].entry = data.entry
             rows[i].text:SetText(data.label)
+
+            -- Only the spell rows carry an icon; the others have none and skip this.
+            if rows[i].icon then
+                local _, _, icon = GetSpellInfo(data.entry)
+
+                -- A spell the client has never heard of still gets a row: the server knows
+                -- it, and a question mark is a clearer symptom than a missing line.
+                rows[i].icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+            end
+
             rows[i]:Show()
 
             -- Only the Spells tab has a persistent selection; the others act on click.
@@ -423,7 +939,10 @@ do
     -- second box-shaped patch of border is left sitting beside the field. The search tabs
     -- never showed it because theirs are 250 wide, so these match them, with the caption
     -- inside the field the way those do.
-    local box = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
+    -- Named: InputBoxTemplate's middle texture anchors to $parentLeft and
+    -- $parentRight, which resolve to nothing on an anonymous frame - leaving
+    -- the box drawn as two end caps with a gap.
+    local box = CreateFrame("EditBox", "SanctuaryGMInputBox3", page, "InputBoxTemplate")
     box:SetWidth(250)
     box:SetHeight(22)
     box:SetPoint("TOPLEFT", page, "TOPLEFT", 6, 0)
@@ -436,6 +955,10 @@ do
 
     box:SetScript("OnTextChanged", function(self)
         if self:GetText() == "" then hint:Show() else hint:Hide() end
+
+        -- Previewed as it is typed. The box is numeric, so this is a number or nothing,
+        -- and a half-typed id simply draws whatever that id happens to be.
+        PreviewCreature(self:GetNumber())
     end)
 
     local onTarget = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
@@ -526,7 +1049,10 @@ do
     -- second box-shaped patch of border is left sitting beside the field. The search tabs
     -- never showed it because theirs are 250 wide, so these match them, with the caption
     -- inside the field the way those do.
-    local box = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
+    -- Named: InputBoxTemplate's middle texture anchors to $parentLeft and
+    -- $parentRight, which resolve to nothing on an anonymous frame - leaving
+    -- the box drawn as two end caps with a gap.
+    local box = CreateFrame("EditBox", "SanctuaryGMInputBox4", page, "InputBoxTemplate")
     box:SetWidth(250)
     box:SetHeight(22)
     box:SetPoint("TOPLEFT", page, "TOPLEFT", 6, 0)
@@ -808,15 +1334,23 @@ do
 end
 
 --------------------------------------------------------------------------
--- Undo, shared across tabs
+-- Undo, shared by the two placing tabs
 --------------------------------------------------------------------------
 
-local undo = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+undo = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
 undo:SetWidth(150)
 undo:SetHeight(22)
-undo:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -14, 14)
+-- In the row with the other two rather than off in the panel's corner. Anchored to the
+-- delete button by name because that button belongs to the object page, which is built
+-- before this - and a frame's position does not depend on whether its page is showing.
+--
+-- Which is also why ShowMode hides it everywhere else. It belongs to the panel, not to a
+-- page, so hiding a page does not hide it - and on the Spells and Sounds tabs it sat in
+-- that same spot, behind Learn and Forget and behind the sound buttons.
+undo:SetPoint("TOPLEFT", SanctuaryGMDeleteAtButton, "BOTTOMLEFT", -158, -6)
 undo:SetText("Undo last placement")
 undo:SetScript("OnClick", function() Send("UNDO") end)
+if not PLACING[state.mode] then undo:Hide() end
 
 --------------------------------------------------------------------------
 -- Incoming
@@ -917,6 +1451,25 @@ local function Handle(body)
                 label = string.format("|cffd8b46a%s|r  %s  |cff9c9081(lvl %s-%s)|r", entry, name, minLevel, maxLevel),
             })
             RenderRows()
+        end
+        return
+    end
+
+    if verb == "GMODEL" then
+        -- "GMODEL <entry> <path>" - the path is taken to the end of the line, since model
+        -- paths contain spaces ("World\Generic\Human\Passive Doodads\...").
+        local entry, path = string.match(rest, "^(%d+)%s+(.+)$")
+        if entry then
+            preview.OnModelPath(tonumber(entry), path)
+        end
+        return
+    end
+
+    if verb == "CMODEL" then
+        -- "CMODEL <entry> <display id>"
+        local entry, displayId = string.match(rest, "^(%d+)%s+(%d+)$")
+        if entry then
+            preview.OnCreatureDisplay(tonumber(entry), tonumber(displayId))
         end
         return
     end

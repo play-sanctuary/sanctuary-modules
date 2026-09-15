@@ -31,6 +31,11 @@
 // opening a second link of its own.
 #include "ProximityVoice.h"
 #include "ScriptMgr.h"
+#include "AllSpellScript.h"
+#include "CellImpl.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
+#include "Spell.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Util.h"
@@ -46,6 +51,9 @@
 
 namespace
 {
+    /// The ground targeted spell the panel casts to choose a spot. See the module SQL.
+    constexpr uint32 PLACE_OBJECT_SPELL = 81013;
+
     bool g_enabled = true;
     std::string g_prefix = "SGM";
     uint32 g_requiredSecurity = SEC_GAMEMASTER;
@@ -265,6 +273,77 @@ namespace
      * triggers and test entries, and a search for something as common as "fireball" buries
      * the six teachable ranks under a hundred things that cannot be learned at all.
      */
+    /*
+     * Takes the placement spell back.
+     *
+     * It is learned when the panel opens and taken away when the panel closes or the
+     * character logs out, so it lives exactly as long as it is useful. It used to be
+     * learned and left, and that put "Place Object" permanently in the spellbook of every
+     * character that had ever opened the panel - which is every character on a game
+     * master's account, since security belongs to the account and not the character. An
+     * ordinary-looking character was carrying a game master's tool in its spellbook.
+     */
+    void ForgetPlaceObjectSpell(Player* player)
+    {
+        if (player && player->HasSpell(PLACE_OBJECT_SPELL))
+            player->removeSpell(PLACE_OBJECT_SPELL, SPEC_MASK_ALL, false);
+    }
+
+    /*
+     * The display a creature is drawn with, so the panel can show it before it is spawned.
+     *
+     * Only the number is sent: a Model frame takes a display id directly through
+     * SetCreature, so the client draws it from its own files. The panel cannot work this
+     * out for itself because creature templates - and so their displays - live only here.
+     *
+     * The FIRST VISIBLE model, not a random one. A template can carry several, and some
+     * carry an invisible one for triggers; a preview that came back blank or differed from
+     * the last look would read as a fault.
+     */
+    void SendCreatureModel(Player* player, uint32 entry)
+    {
+        CreatureTemplate const* creature = sObjectMgr->GetCreatureTemplate(entry);
+
+        if (!creature)
+            return;
+
+        CreatureModel const* model = creature->GetFirstVisibleModel();
+
+        // Silence rather than a message: this answers a mouse moving over a list.
+        if (!model || !model->CreatureDisplayID)
+            return;
+
+        Send(player, Acore::StringFormat("CMODEL {} {}", entry, model->CreatureDisplayID));
+    }
+
+    /*
+     * The model file an object is drawn from, so the panel can show it before it is placed.
+     *
+     * What is sent is a PATH, not a model: the file is already in the player's own client,
+     * and GameObjectDisplayInfo.dbc - which both halves have - is what maps a display to it.
+     * So the answer is a string the addon hands straight to a Model frame.
+     *
+     * Objects need this and creatures do not, because a Model frame has no call that takes
+     * an object: SetCreature understands display ids, SetModel wants a file.
+     */
+    void SendObjectModel(Player* player, uint32 entry)
+    {
+        GameObjectTemplate const* object = sObjectMgr->GetGameObjectTemplate(entry);
+
+        if (!object)
+            return;
+
+        GameObjectDisplayInfoEntry const* display =
+            sGameObjectDisplayInfoStore.LookupEntry(object->displayId);
+
+        // Silence rather than a message: this answers a mouse moving over a list, and an
+        // object whose display the client cannot draw is simply not previewed.
+        if (!display || !display->filename || !*display->filename)
+            return;
+
+        Send(player, Acore::StringFormat("GMODEL {} {}", entry, display->filename));
+    }
+
     void SearchSpells(Player* player, std::string const& needle)
     {
         std::wstring wideNeedle;
@@ -408,16 +487,26 @@ namespace
 
     // --- actions ----------------------------------------------------------
 
+    void SpawnCreatureAt(Player* player, uint32 entry, bool permanent,
+                         float x, float y, float z);
+
+    /// Beside the player, which is what spawning one without choosing a spot means.
     void SpawnCreature(Player* player, uint32 entry, bool permanent)
+    {
+        float x, y, z;
+        player->GetClosePoint(x, y, z, player->GetObjectSize());
+
+        SpawnCreatureAt(player, entry, permanent, x, y, z);
+    }
+
+    void SpawnCreatureAt(Player* player, uint32 entry, bool permanent,
+                         float x, float y, float z)
     {
         if (!sObjectMgr->GetCreatureTemplate(entry))
         {
             Notify(player, "No creature with entry " + std::to_string(entry) + ".");
             return;
         }
-
-        float x, y, z;
-        player->GetClosePoint(x, y, z, player->GetObjectSize());
 
         if (!permanent)
         {
@@ -460,7 +549,157 @@ namespace
         Notify(player, "Spawned " + std::to_string(entry) + " permanently.");
     }
 
+    /*
+     * Removes the object the game master is standing at.
+     *
+     * NEAREST IS THE SELECTION, because there is no other. The client cannot target a
+     * gameobject - there is no unit frame for a door - so the core's own `.gobject delete`
+     * works from a guid remembered by a previous `.gobject target`, which is two commands
+     * and a thing to keep track of. Standing next to what you mean is the gesture people
+     * actually use, and it is unambiguous at this range.
+     *
+     * The radius is deliberately short. A generous one turns "delete this crate" into
+     * "delete whichever of these six crates the search happened to reach first", and the
+     * object it removes may not be the one being looked at.
+     */
+    void RemoveObject(Player* player, GameObject* object);
+
+    void DeleteNearestObject(Player* player)
+    {
+        float const reach = 10.0f;
+
+        GameObject* object = player->FindNearestGameObject(0, reach);
+
+        if (!object)
+        {
+            Notify(player, "Nothing within reach to remove. Stand closer to it.");
+            return;
+        }
+
+        RemoveObject(player, object);
+    }
+
+    /// Removes one object, saved or summoned. Split out because two buttons find their
+    /// object differently and then want exactly the same thing done to it.
+    void RemoveObject(Player* player, GameObject* object)
+    {
+        std::string const name = object->GetGOInfo() ? object->GetGOInfo()->name : "object";
+        uint32 const entry = object->GetEntry();
+        ObjectGuid::LowType const spawnId = object->GetSpawnId();
+
+        /*
+         * A spawned object and a saved one are removed differently, and getting it wrong
+         * leaves the world looking right until the next restart brings the thing back.
+         *
+         * A temporary summon has no spawn id and only needs despawning. One saved to the
+         * database has to have its row deleted as well, which is what DeleteFromDB does -
+         * the same call `.gobject delete` makes.
+         */
+        if (spawnId)
+        {
+            object->SetRespawnTime(0);
+            object->Delete();
+            object->DeleteFromDB();
+
+            Notify(player, "Removed " + name + " (" + std::to_string(entry) + ") for good.");
+        }
+        else
+        {
+            object->Delete();
+            Notify(player, "Removed " + name + " (" + std::to_string(entry) + ").");
+        }
+    }
+
+    /*
+     * Removes whichever object is closest to a point, rather than to the player.
+     *
+     * The ground targeted cast hands over a position that may be thirty yards away, so the
+     * "nearest to me" search the Delete nearest button uses cannot answer this. Objects are
+     * gathered around the PLAYER, because that is whose grid is loaded, and then judged by
+     * their distance to the CLICKED point - which is what was actually pointed at.
+     *
+     * The acceptance radius is small on purpose. Clicking a patch of empty ground should
+     * remove nothing at all rather than the nearest thing within shouting distance.
+     */
+    void DeleteObjectNearPoint(Player* player, float x, float y, float z)
+    {
+        float const accept = 6.0f;
+        float const sweep = 120.0f;      // wide enough to cover anywhere the reticle reaches
+
+        std::list<GameObject*> found;
+        Acore::GameObjectInRangeCheck check(x, y, z, accept);
+        Acore::GameObjectListSearcher<Acore::GameObjectInRangeCheck> searcher(player, found, check);
+
+        Cell::VisitObjects(player, searcher, sweep);
+
+        GameObject* best = nullptr;
+        float bestDistance = accept * accept;
+
+        for (GameObject* candidate : found)
+        {
+            float const dx = candidate->GetPositionX() - x;
+            float const dy = candidate->GetPositionY() - y;
+            float const dz = candidate->GetPositionZ() - z;
+            float const distance = dx * dx + dy * dy + dz * dz;
+
+            if (distance <= bestDistance)
+            {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+
+        if (!best)
+        {
+            Notify(player, "Nothing there to remove. Click closer to the object itself.");
+            return;
+        }
+
+        RemoveObject(player, best);
+    }
+
+    void SpawnGameObjectAt(Player* player, uint32 entry, bool permanent,
+                           float x, float y, float z, float o);
+
+    /// Where the player is standing, which is what clicking a row without the placement
+    /// mode on has always meant.
     void SpawnGameObject(Player* player, uint32 entry, bool permanent)
+    {
+        SpawnGameObjectAt(player, entry, permanent,
+            player->GetPositionX(), player->GetPositionY(),
+            player->GetPositionZ(), player->GetOrientation());
+    }
+
+    /*
+     * What a game master has chosen but not yet put down.
+     *
+     * Set when a result row is clicked with "place where I click" on, and spent by the next
+     * cast of 81013. In memory only: a pending placement is a half-finished gesture, and
+     * one that survived a logout would be an object appearing hours later beside somebody
+     * who had forgotten they were holding it.
+     */
+    struct Pending
+    {
+        uint32 entry = 0;
+        bool permanent = false;
+
+        // The same reticle serves every job. A spell per action would have meant a client
+        // patch per action, for differences the server already knows.
+        bool deleting = false;
+        bool creature = false;
+    };
+
+    std::unordered_map<ObjectGuid, Pending> g_pendingPlacement;
+
+    /*
+     * Places an object at a given point, which is the whole reason ground targeting exists.
+     *
+     * The position is a parameter rather than read from the player, because the interesting
+     * caller is the one that got it from a spell cast - the client picked the spot, and the
+     * player is standing somewhere else entirely.
+     */
+    void SpawnGameObjectAt(Player* player, uint32 entry, bool permanent,
+                           float x, float y, float z, float o)
     {
         GameObjectTemplate const* info = sObjectMgr->GetGameObjectTemplate(entry);
         if (!info)
@@ -468,11 +707,6 @@ namespace
             Notify(player, "No object with entry " + std::to_string(entry) + ".");
             return;
         }
-
-        float const x = player->GetPositionX();
-        float const y = player->GetPositionY();
-        float const z = player->GetPositionZ();
-        float const o = player->GetOrientation();
 
         // Same construction the core's own .gobject add uses, so a placed object is
         // oriented identically to one made by hand.
@@ -696,6 +930,22 @@ namespace
                 return;
             }
 
+            /*
+             * Taught here, because a secure button casts out of the SPELLBOOK.
+             *
+             * The Place button is a SecureActionButtonTemplate with type="spell", and that
+             * is the only way an addon may cast at all - casting is protected. But it casts
+             * by name, from what the player knows, so a game master who had never learned
+             * 81013 pressed Place and got nothing: no reticle, no error worth reading, and
+             * nothing sent to the server to explain it.
+             *
+             * Learning it here rather than in a migration keeps it tied to the panel: it
+             * appears the first time an authorised account opens it, and an account that
+             * never opens it never gets it.
+             */
+            if (!player->HasSpell(PLACE_OBJECT_SPELL))
+                player->learnSpell(PLACE_OBJECT_SPELL);
+
             // The panel asks on open; the answer is what unlocks its controls.
             Send(player, Acore::StringFormat("READY {} {}", security, g_searchLimit));
             return;
@@ -777,6 +1027,82 @@ namespace
             else
                 SpawnGameObject(player, entry, permanent != 0);
 
+            return;
+        }
+
+        // The panel has closed. Its spell goes with it, and so does whatever was chosen.
+        if (verb == "BYE")
+        {
+            g_pendingPlacement.erase(player->GetGUID());
+            ForgetPlaceObjectSpell(player);
+            return;
+        }
+
+        if (verb == "GMODEL" || verb == "CMODEL")
+        {
+            uint32 entry = 0;
+            stream >> entry;
+
+            if (!entry)
+                return;
+
+            if (verb == "GMODEL")
+                SendObjectModel(player, entry);
+            else
+                SendCreatureModel(player, entry);
+
+            return;
+        }
+
+        if (verb == "GPENDING")
+        {
+            uint32 entry = 0;
+            uint32 permanent = 0;
+            uint32 deleting = 0;
+            uint32 creature = 0;
+            stream >> entry >> permanent >> deleting >> creature;
+
+            /*
+             * Deleting is a pending action with no object attached, which is why it shares
+             * this verb rather than having one of its own: the difference between "put this
+             * here" and "take away whatever is here" is one flag, and both are answered by
+             * the same reticle.
+             */
+            if (deleting)
+            {
+                g_pendingPlacement[player->GetGUID()] = { 0, false, true, false };
+                Notify(player, "Ready. Press Place, then click the object to remove.");
+                return;
+            }
+
+            if (!entry)
+            {
+                g_pendingPlacement.erase(player->GetGUID());
+                Notify(player, "Placement cleared.");
+                return;
+            }
+
+            if (creature)
+            {
+                if (!sObjectMgr->GetCreatureTemplate(entry))
+                {
+                    Notify(player, "No creature with entry " + std::to_string(entry) + ".");
+                    return;
+                }
+            }
+            else if (!sObjectMgr->GetGameObjectTemplate(entry))
+            {
+                Notify(player, "No object with entry " + std::to_string(entry) + ".");
+                return;
+            }
+
+            g_pendingPlacement[player->GetGUID()] = { entry, permanent != 0, false, creature != 0 };
+            return;
+        }
+
+        if (verb == "GDELETE")
+        {
+            DeleteNearestObject(player);
             return;
         }
 
@@ -906,6 +1232,10 @@ public:
     {
         g_placed.erase(player->GetGUID());
         g_budgets.erase(player->GetGUID());
+        g_pendingPlacement.erase(player->GetGUID());
+
+        // Not left behind in the spellbook: see ForgetPlaceObjectSpell.
+        ForgetPlaceObjectSpell(player);
     }
 };
 
@@ -967,8 +1297,84 @@ public:
     }
 };
 
+/*
+ * Putting the object down where the reticle was.
+ *
+ * Spell::cast() runs at the END of a cast, and this one is instant, so by the time this is
+ * reached the client has already chosen the point and sent it. m_targets carries it as a
+ * destination because the spell asks for TARGET_FLAG_DEST_LOCATION - that flag is the whole
+ * reason the client offered a reticle rather than casting on the spot.
+ */
+class sanctuary_gm_place_spell : public AllSpellScript
+{
+public:
+    sanctuary_gm_place_spell() : AllSpellScript("sanctuary_gm_place_spell",
+        { ALLSPELLHOOK_ON_CAST }) { }
+
+    void OnSpellCast(Spell* spell, Unit* caster, SpellInfo const* spellInfo, bool /*skipCheck*/) override
+    {
+        if (!spellInfo || spellInfo->Id != PLACE_OBJECT_SPELL || !spell)
+            return;
+
+        Player* player = caster ? caster->ToPlayer() : nullptr;
+
+        if (!player)
+            return;
+
+        auto pending = g_pendingPlacement.find(player->GetGUID());
+
+        if (pending == g_pendingPlacement.end())
+            return Notify(player, "Nothing chosen to place. Pick an object from the list first.");
+
+        // Re-checked here rather than trusted from when it was chosen: the panel is an
+        // addon, and every other verb in this module answers to the same rule.
+        if (!IsAuthorised(player))
+            return;
+
+        if (!spell->m_targets.HasDst())
+            return Notify(player, "That did not land anywhere. Click the ground.");
+
+        Position const dest = spell->m_targets.GetDstPos()->GetPosition();
+
+        /*
+         * The choice SURVIVES being used, whichever it is.
+         *
+         * Laying out a camp is the same object put down eight times, and forgetting the
+         * selection after each one turned that into eight trips back to the list. It is
+         * cleared by choosing something else, or by right-clicking the row - which is the
+         * gesture for "I have finished with this".
+         */
+        Pending const chosen = pending->second;
+
+        /*
+         * Facing away from the game master, which is what "put it there" nearly always
+         * means: a door or a sign wants its front toward the person placing it, and the
+         * player's own orientation would have it facing wherever they happened to look.
+         */
+        if (chosen.deleting)
+        {
+            DeleteObjectNearPoint(player, dest.GetPositionX(), dest.GetPositionY(),
+                dest.GetPositionZ());
+            return;
+        }
+
+        if (chosen.creature)
+        {
+            SpawnCreatureAt(player, chosen.entry, chosen.permanent,
+                dest.GetPositionX(), dest.GetPositionY(), dest.GetPositionZ());
+            return;
+        }
+
+        float const facing = player->GetAngle(dest.GetPositionX(), dest.GetPositionY());
+
+        SpawnGameObjectAt(player, chosen.entry, chosen.permanent,
+            dest.GetPositionX(), dest.GetPositionY(), dest.GetPositionZ(), facing);
+    }
+};
+
 void AddSC_sanctuary_gm_scripts()
 {
+    new sanctuary_gm_place_spell();
     new sanctuary_gm_playerscript();
     new sanctuary_gm_worldscript();
 }

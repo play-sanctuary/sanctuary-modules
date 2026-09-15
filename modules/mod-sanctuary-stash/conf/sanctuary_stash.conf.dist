@@ -78,3 +78,50 @@ SanctuaryStash.Locksmith.TextId = 990200
 #
 
 SanctuaryStash.OpenSpell = 81011
+
+#
+#    SanctuaryStash.Lockpick.Entry
+#        The item that opens a strongbox it was not cut for, and is destroyed doing it.
+#        Reached for only when nothing in the bags fits the lock, so carrying one alongside
+#        the right key costs nothing. 0 disables it and leaves boxes to their own keys.
+#
+SanctuaryStash.Lockpick.Entry = 990006
+
+#
+#    SanctuaryStash.Lockpick.OpenSpell
+#        Description: The longer cast used when a box is being opened with the pick rather
+#                     than a key. 81012 is Sanctuary's own "Lockpicking" - eight seconds,
+#                     the kneel-and-work animation, and broken by movement, pushback, the
+#                     interrupt school, autoattack and damage.
+#
+#                     It is a second spell rather than a longer version of OpenSpell
+#                     because a cast time cannot be varied per cast; the length has to
+#                     come from a different row. Its own effect is stripped out at load,
+#                     since all that is wanted from it is the delay.
+#
+#                     0 makes picking take the same two seconds as a key.
+#        Default:     81012
+#
+
+SanctuaryStash.Lockpick.OpenSpell = 81012
+
+#
+#    SanctuaryStash.RefuseStrandedKeys
+#        Description: Whether a deposit that would leave a key unreachable is refused, or
+#                     only noted.
+#
+#                     A key is unreachable when the box it opens can no longer be opened -
+#                     its own key shut inside it, or two boxes holding each other's keys,
+#                     or a longer ring of the same thing. The module works that out by
+#                     reachability rather than by looking at the box in front of you, so
+#                     rings of any length are seen.
+#
+#                     0 lets it happen: the player is warned, a line goes to the log naming
+#                     the key, the box and who did it, and the deposit proceeds. Game master
+#                     mode opens any lock, so nothing is lost for good.
+#
+#                     1 refuses the deposit instead.
+#        Default:     0 - allowed, and recorded
+#
+
+SanctuaryStash.RefuseStrandedKeys = 0

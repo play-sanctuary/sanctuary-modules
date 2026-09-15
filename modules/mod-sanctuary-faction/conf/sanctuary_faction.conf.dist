@@ -1,0 +1,28 @@
+[worldserver]
+
+########################################
+# mod-sanctuary-faction
+#
+# Player factions: an organisation a character belongs to, with a ladder of ranks, where
+# the rank grants powers the other modules check for and, optionally, spells.
+#
+# There is very little to configure here on purpose. Everything that would normally be a
+# setting - what factions exist, what their ranks are called, what each rank grants - is
+# created at runtime with `.faction` and stored in the characters database, so that a new
+# faction costs a command rather than an edit and a restart.
+########################################
+
+#
+#    SanctuaryFaction.Enable
+#        Description: Whether the module does anything at all.
+#
+#                     Off is a real off: memberships stop being reported to the other
+#                     modules, so a rank that was granting somebody the power to shackle
+#                     stops granting it. Spells already learned are NOT unlearned, because
+#                     switching a module off should not quietly strip things from
+#                     characters - they are settled at the next login after it is switched
+#                     back on.
+#        Default:     1 - on
+#
+
+SanctuaryFaction.Enable = 1

@@ -47,6 +47,19 @@ is verbatim, and was taken from the AzerothCore source tree.
 
 
 -------------------------------------------------------------------------------
+THIRD-PARTY MODULE
+-------------------------------------------------------------------------------
+
+modules/mod-skip-dk-starting-area is not Sanctuary's work. It is included
+unmodified, because Sanctuary runs it, under its own licence:
+
+  mod-skip-dk-starting-area
+  Copyright (c) 2022 AzerothCore
+  https://github.com/azerothcore/mod-skip-dk-starting-area (commit cd0bac4)
+  Licensed under the MIT License - see modules/mod-skip-dk-starting-area/LICENSE.
+
+
+-------------------------------------------------------------------------------
 TRADEMARKS AND GAME CONTENT
 -------------------------------------------------------------------------------
 

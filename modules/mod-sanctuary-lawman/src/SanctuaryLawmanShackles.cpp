@@ -1,8 +1,13 @@
 /*
  * mod-sanctuary-lawman - Iron Shackles
  *
- * Used on a player: a five second cast at five yards that disarms them and tethers them
- * within ten yards of whoever put them on. An Iron Shackle Key undoes it.
+ * Used on a player: a ten second cast that disarms them and tethers them within ten yards
+ * of whoever put them on. An Iron Shackle Key undoes it, over five seconds of its own.
+ *
+ * Both are deliberately slow, and the irons are the slower of the two. Each is done to
+ * somebody who has not agreed to it, in front of whoever else is standing there, and the
+ * length of the cast is most of what gives those people a chance to intervene. The key is
+ * the shorter half because a rescue under way is meant to be able to finish.
  *
  * **Authority here is possession, not office.** Nothing in this file asks whether anyone
  * is a lawman. That is deliberate: the shackles and the key are tradeable, and a criminal
@@ -15,7 +20,8 @@
  * spell by returning true from OnUse; this returns *false*, so Player::CastItemUseSpell
  * builds a genuine Spell. That buys the cast bar, movement interruption, range, line of
  * sight and target validation from the core for free - including a second CheckCast when
- * the bar completes, so walking out of range during the five seconds fails the cast.
+ * the bar completes, so walking out of range while it runs fails the cast. The key works
+ * the same way now; it used to suppress its spell, which made a rescue instant and silent.
  *
  * **Nothing is persisted.** A shackle dies when either party leaves the world, so it lives
  * only in memory. That is a decision, not an oversight: it means there is no way to end up
@@ -92,7 +98,26 @@ namespace
      * somebody ought to look like.
      */
     uint32 g_shackleSpell = 81001;
-    uint32 g_castTimeIndex = 6;        ///> SpellCastTimes.dbc index 6 == 5000 ms
+
+    /*
+     * SpellCastTimes.dbc index 7 == 10000 ms.
+     *
+     * This is forced onto the SpellInfo at load and therefore BEATS the spell_dbc row, so
+     * the two have to be changed together - a migration alone is silently overridden here.
+     * Ten seconds because putting somebody in irons is done to an unwilling person, and
+     * the length of it is most of what gives anyone watching a chance to stop it.
+     */
+    uint32 g_castTimeIndex = 7;
+
+    /*
+     * The key's own cast, five seconds of it, and a real cast now.
+     *
+     * It used to be instant and suppressed - the item script answered OnUse and returned
+     * true - which made freeing a prisoner silent, unstoppable, and over before anybody
+     * standing there could react. Its cast time is in spell_dbc rather than forced here,
+     * because unlike Shackling this row is ours rather than a borrowed retail spell.
+     */
+    uint32 g_keySpell = 81008;
 
     /// 6608 "Dropped Weapon" - SPELL_AURA_MOD_DISARM, with a debuff name that reads right.
     uint32 g_disarmSpell = 6608;
@@ -337,6 +362,33 @@ namespace
 
         return nullptr;
     }
+
+    /*
+     * Why this lock will not open, or nullptr if it will.
+     *
+     * Checked twice for the same reason the shackles are: the key's spell is self-cast, so
+     * it validates nothing about the prisoner, and five seconds is long enough to walk
+     * apart, lose sight of each other, or for somebody else to free them first.
+     *
+     * A key is a key throughout - it does not ask who fitted the irons, which is what lets
+     * one that has found its way into the wrong hands free the wrong person.
+     */
+    char const* KeyRefusal(Player* freer, Player* prisoner)
+    {
+        if (!prisoner)
+            return "Select the person you mean to free.";
+
+        if (!SanctuaryLawman::IsShackled(prisoner))
+            return "They are not in irons.";
+
+        if (!freer->IsWithinDistInMap(prisoner, g_keyRange))
+            return "Too far away to reach the lock.";
+
+        if (!freer->IsWithinLOSInMap(prisoner))
+            return "You cannot see them.";
+
+        return nullptr;
+    }
 }
 
 namespace SanctuaryLawman
@@ -491,7 +543,17 @@ public:
     }
 };
 
-/// The key. Instant, so it suppresses its spell the way the writ does.
+/*
+ * The key.
+ *
+ * Five seconds of work now, the same shape as the shackles: only the cheap refusals happen
+ * here, then it returns false and the core runs the real cast, and the lock actually opens
+ * when the bar fills.
+ *
+ * It was instant and suppressed its spell, which made a rescue silent and impossible to
+ * interrupt - somebody could be freed out from under the person who put them there with
+ * nothing to see and nothing to do about it. The five seconds are the whole point.
+ */
 class sanctuary_lawman_shackle_key : public ItemScript
 {
 public:
@@ -524,28 +586,12 @@ public:
         if (!prisoner && unit)
             prisoner = unit->ToPlayer();
 
-        if (!prisoner)
-            return refuse("Select the person you mean to free.");
+        if (char const* problem = KeyRefusal(player, prisoner))
+            return refuse(problem);
 
-        if (!SanctuaryLawman::IsShackled(prisoner))
-            return refuse("They are not in irons.");
-
-        // Suppressing the cast skips the core's own checks, so this one is by hand.
-        if (!player->IsWithinDistInMap(prisoner, g_keyRange))
-            return refuse("Too far away to reach the lock.");
-
-        // A key is a key. It does not ask who put them on - which is what lets a key that
-        // has found its way into the wrong hands free the wrong person.
-        LOG_INFO("module.sanctuarylawman", "{} unlocked the shackles on {}.",
-            player->GetName(), prisoner->GetName());
-
-        Release(prisoner, "The irons fall away.");
-
-        if (player->GetSession())
-            ChatHandler(player->GetSession()).PSendSysMessage(
-                "You unlock the shackles on {}.", SanctuaryIdentity::LabelFor(player, prisoner));
-
-        return true;
+        // The cast is the core's from here. Everything above is re-tested when the bar
+        // finishes, because a self-cast tells the core nothing about who it was aimed at.
+        return false;
     }
 };
 
@@ -565,7 +611,18 @@ public:
 
     void OnSpellCast(Spell* spell, Unit* caster, SpellInfo const* spellInfo, bool /*skipCheck*/) override
     {
-        if (!g_enabled || !spell || !spellInfo || spellInfo->Id != g_shackleSpell)
+        if (!g_enabled || !spell || !spellInfo)
+            return;
+
+        // The key finishing is the opposite job and short enough to do here rather than in
+        // a second script: same shape, same re-check, one lock instead of one prisoner.
+        if (spellInfo->Id == g_keySpell)
+        {
+            OnKeyCast(spell, caster);
+            return;
+        }
+
+        if (spellInfo->Id != g_shackleSpell)
             return;
 
         // The base spell is a real one that other things may use, so the cast only counts
@@ -578,7 +635,7 @@ public:
         if (!captor)
             return;
 
-        // The selection again, and re-tested from scratch: five seconds is long enough to
+        // The selection again, and re-tested from scratch: ten seconds is long enough to
         // walk out of reach, break line of sight, die, or pick a different target
         // entirely, and a self-cast tells the core none of that.
         Player* prisoner = captor->GetSelectedPlayer();
@@ -682,6 +739,47 @@ public:
 
         LOG_INFO("module.sanctuarylawman", "{} shackled {} for {} minutes.",
             captor->GetName(), prisoner->GetName(), g_minutes);
+    }
+
+private:
+    /*
+     * The key's bar filling.
+     *
+     * Re-tested from scratch rather than trusted from OnUse: five seconds is long enough
+     * to walk apart, lose sight of each other, or for somebody else to reach the lock
+     * first - and a self-cast tells the core none of it.
+     */
+    static void OnKeyCast(Spell* spell, Unit* caster)
+    {
+        // The key's spell is ours alone, but it is still worth insisting the cast came
+        // from the key rather than from anything else that learns to cast it later.
+        if (!spell->m_CastItem || spell->m_CastItem->GetEntry() != g_keyEntry)
+            return;
+
+        Player* freer = caster ? caster->ToPlayer() : nullptr;
+
+        if (!freer)
+            return;
+
+        Player* prisoner = freer->GetSelectedPlayer();
+
+        if (char const* problem = KeyRefusal(freer, prisoner))
+        {
+            if (freer->GetSession())
+                ChatHandler(freer->GetSession()).PSendSysMessage("{}", problem);
+            return;
+        }
+
+        // A key is a key. It does not ask who put them on - which is what lets a key that
+        // has found its way into the wrong hands free the wrong person.
+        LOG_INFO("module.sanctuarylawman", "{} unlocked the shackles on {}.",
+            freer->GetName(), prisoner->GetName());
+
+        Release(prisoner, "The irons fall away.");
+
+        if (freer->GetSession())
+            ChatHandler(freer->GetSession()).PSendSysMessage(
+                "You unlock the shackles on {}.", SanctuaryIdentity::LabelFor(freer, prisoner));
     }
 };
 
@@ -806,30 +904,48 @@ public:
      * Cancels a shackling that has stopped making sense.
      *
      * The cast is on the caster, so the core checks nothing about the prisoner for the
-     * whole five seconds - not that they are still in reach, not that they are still
+     * whole ten seconds - not that they are still in reach, not that they are still
      * visible, not that they are still the person who was selected. Moving is handled by
      * the core now that the spell has interrupt flags; everything about the *other* end of
      * the chain has to be watched here.
+     *
+     * The key is watched the same way and for the same reason. Its five seconds are
+     * shorter but no better supervised, and a cast that runs to the end only to refuse is
+     * worse than one that stops the moment it stopped making sense.
      */
     static void WatchTheCast(Player* player)
     {
         Spell* casting = player->GetCurrentSpell(CURRENT_GENERIC_SPELL);
-        bool const shackling = casting && casting->GetSpellInfo()->Id == g_shackleSpell;
+        uint32 const casting_id = casting ? casting->GetSpellInfo()->Id : 0;
 
-        // Fitting irons is work, and it looks like it. Set before the early return so
-        // that finishing, cancelling and being interrupted all put the pose away again.
-        WorkTheIrons(player, shackling);
+        bool const shackling = casting_id == g_shackleSpell;
+        bool const unlocking = casting_id == g_keySpell;
 
-        if (!shackling)
-            return;
+        // Fitting irons is work, and it looks like it - so is picking them open. Set before
+        // the early return so that finishing, cancelling and being interrupted all put the
+        // pose away again.
+        WorkTheIrons(player, shackling || unlocking);
 
-        if (!Refusal(player, player->GetSelectedPlayer()))
-            return;
+        if (shackling)
+        {
+            if (!Refusal(player, player->GetSelectedPlayer()))
+                return;
 
-        player->InterruptNonMeleeSpells(false, g_shackleSpell);
+            player->InterruptNonMeleeSpells(false, g_shackleSpell);
 
-        if (player->GetSession())
-            ChatHandler(player->GetSession()).PSendSysMessage("They are out of your reach. The irons stay open.");
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).PSendSysMessage("They are out of your reach. The irons stay open.");
+        }
+        else if (unlocking)
+        {
+            if (!KeyRefusal(player, player->GetSelectedPlayer()))
+                return;
+
+            player->InterruptNonMeleeSpells(false, g_keySpell);
+
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).PSendSysMessage("They are out of your reach. The lock stays shut.");
+        }
     }
 
     /*
@@ -902,6 +1018,7 @@ public:
         g_shacklesEntry = sConfigMgr->GetOption<uint32>("SanctuaryLawman.Shackles.Entry", 990001);
         g_keyEntry = sConfigMgr->GetOption<uint32>("SanctuaryLawman.Shackles.KeyEntry", 990002);
         g_shackleSpell = sConfigMgr->GetOption<uint32>("SanctuaryLawman.Shackles.CastSpell", 81001);
+        g_keySpell = sConfigMgr->GetOption<uint32>("SanctuaryLawman.Shackles.KeySpell", 81008);
         g_disarmSpell = sConfigMgr->GetOption<uint32>("SanctuaryLawman.Shackles.DisarmSpell", 6608);
         g_minutes = std::max(1u, sConfigMgr->GetOption<uint32>("SanctuaryLawman.Shackles.Minutes", 10));
         g_tether = std::clamp(sConfigMgr->GetOption<float>("SanctuaryLawman.Shackles.Tether", 5.0f), 3.0f, 60.0f);

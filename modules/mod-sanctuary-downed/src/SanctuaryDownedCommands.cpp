@@ -29,12 +29,30 @@ namespace
     // arbitrary vehicle id, which is a measuring tool rather than a thing to play with.
     constexpr uint32 RBAC_PERM_COMMAND_CARRY_STAGING = 100006;
 
+    /*
+     * Says something to whoever ran the command, in their chat window.
+     *
+     * A command that arrives over the addon channel gets an AddonChannelCommandHandler,
+     * and its SendSysMessage returns the text to the ADDON as an `m` packet rather than
+     * putting it on screen. The buttons in SanctuaryDowned send their commands that way
+     * now, so a refusal written with the plain handler would be delivered to a client that
+     * is not listening for it. Lifted from mod-sanctuary-stash, which found this the hard
+     * way.
+     */
+    void Say(ChatHandler* handler, std::string const& line)
+    {
+        if (Player* player = handler->GetPlayer())
+            ChatHandler(player->GetSession()).PSendSysMessage("{}", line);
+        else
+            handler->PSendSysMessage("{}", line);
+    }
+
     bool Report(ChatHandler* handler, SanctuaryDowned::Result result)
     {
         if (char const* problem = SanctuaryDowned::Explain(result))
         {
-            handler->SendErrorMessage(problem);
-            return false;
+            Say(handler, problem);
+            return true;      // reported, not a usage error: the command did run
         }
 
         return true;
@@ -104,11 +122,10 @@ public:
 
         if (!SanctuaryDowned::GetDown(player))
         {
-            handler->SendErrorMessage(
-                SanctuaryDowned::IsDowned(player)
+            Say(handler, SanctuaryDowned::IsDowned(player)
                     ? "You are in no state to."
                     : "Nobody is carrying you.");
-            return false;
+            return true;
         }
 
         return true;
@@ -126,11 +143,11 @@ public:
 
         if (!SanctuaryDowned::GiveUp(player))
         {
-            handler->SendErrorMessage("You are not down.");
-            return false;
+            Say(handler, "You are not down.");
+            return true;
         }
 
-        handler->PSendSysMessage("You stop holding on.");
+        Say(handler, "You stop holding on.");
         return true;
     }
 

@@ -154,15 +154,22 @@ ProximityVoice.Range.Max = 100.0
 #    ProximityVoice.Language.Enforce
 #        Description: Apply the same language rules to voice as text chat does. A
 #                     listener who has not learned the speaker's language never
-#                     receives the audio - they get a loudness envelope their
-#                     client resynthesises, so the rhythm and emphasis survive but
-#                     no words do.
+#                     receives the words: the voice server sends them the speaker's
+#                     voice through a wall instead - pitch, rhythm and tone with the
+#                     consonants gone - or, in its "synth" mode, a loudness envelope
+#                     their launcher turns into a wordless voice.
 #
-#                     Off by default. The synthesised voice is a buzz, and two
-#                     players who cannot understand each other hearing nothing but
-#                     a buzz is far more often a confusing bug report than the
-#                     roleplaying effect it was meant to be. Turn it on only if you
-#                     actually want cross-faction speech to be unintelligible.
+#                     Knowledge can be partial. A language skill below 300 (set with
+#                     .voice teach <language> <percent>, or .setskill) lets that
+#                     share of the words through clearly and muffles the rest; the
+#                     game itself always learns languages at 300, so nothing changes
+#                     until a game master lowers one. Text chat keeps treating any
+#                     skill as fluent.
+#
+#                     Off by default: two players who cannot understand each other
+#                     is far more often a confusing bug report than the roleplaying
+#                     effect it was meant to be. Turn it on only if you actually
+#                     want cross-faction speech to be unintelligible.
 #        Default:     0 - (Disabled)
 #
 ProximityVoice.Language.Enforce = 0

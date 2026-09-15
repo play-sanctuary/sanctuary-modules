@@ -8,6 +8,7 @@
 #include "ProximityVoice.h"
 #include "Chat.h"
 #include "CommandScript.h"
+#include "ObjectMgr.h"
 #include "Player.h"
 #include "RBAC.h"
 #include <algorithm>
@@ -33,6 +34,7 @@ public:
             { "range",  HandleVoiceRangeCommand,  RBAC_PERM_COMMAND_VOICE,               Console::No  },
             { "lang",   HandleVoiceLangCommand,   RBAC_PERM_COMMAND_VOICE,               Console::No  },
             { "langs",  HandleVoiceLangsCommand,  RBAC_PERM_COMMAND_VOICE,               Console::No  },
+            { "teach",  HandleVoiceTeachCommand,  rbac::RBAC_PERM_COMMAND_SETSKILL,      Console::No  },
             { "token",  HandleVoiceTokenCommand,  RBAC_PERM_COMMAND_VOICE,               Console::No  },
             { "mute",   HandleVoiceMuteCommand,   RBAC_PERM_COMMAND_VOICE,               Console::No  },
             { "unmute", HandleVoiceUnmuteCommand, RBAC_PERM_COMMAND_VOICE,               Console::No  },
@@ -138,7 +140,7 @@ public:
         if (!player)
             return false;
 
-        std::vector<uint32> const known = ProximityVoice::CollectKnownLanguages(player);
+        std::vector<ProximityVoice::KnownLanguage> const known = ProximityVoice::CollectKnownLanguages(player);
         if (known.empty())
         {
             handler->PSendSysMessage("You have not learned any languages.");
@@ -146,10 +148,74 @@ public:
         }
 
         handler->PSendSysMessage("|cff00ff96Languages you can speak and understand:|r");
-        for (uint32 language : known)
-            handler->PSendSysMessage("  {}", ProximityVoice::GetLanguageName(language));
+        for (ProximityVoice::KnownLanguage const& entry : known)
+        {
+            if (entry.proficiency >= 100)
+                handler->PSendSysMessage("  {}", ProximityVoice::GetLanguageName(entry.language));
+            else
+                handler->PSendSysMessage("  {} - {}%, so a few words", ProximityVoice::GetLanguageName(entry.language), uint32(entry.proficiency));
+        }
 
-        handler->PSendSysMessage("Anyone speaking a language not on this list will sound like noise to you.");
+        handler->PSendSysMessage("Anyone speaking a language not on this list will sound muffled to you, as if through a wall.");
+        return true;
+    }
+
+    /*
+     * .voice teach <language> <percent>, on the selected player or yourself.
+     *
+     * Sets the language's skill to that share of 300, which is the one number the
+     * barrier reads: 100 is fluent, 0 forgets it, anything between lets that share of
+     * the words through. The skill hook tells the voice server, so it takes effect on
+     * the next thing said. Game master only - the same permission as .setskill, which
+     * does the same thing to the same number by id.
+     */
+    static bool HandleVoiceTeachCommand(ChatHandler* handler, Optional<std::string> name, Optional<uint32> percent)
+    {
+        Player* target = handler->getSelectedPlayerOrSelf();
+        if (!target)
+            return false;
+
+        if (!name || name->empty() || !percent)
+        {
+            handler->PSendSysMessage("Usage: .voice teach <language> <0-100>, on the selected player or yourself.");
+            return true;
+        }
+
+        uint32 language = 0;
+        if (!ProximityVoice::ParseLanguage(*name, language))
+        {
+            handler->SendErrorMessage("Unknown language \"{}\".", *name);
+            return false;
+        }
+
+        LanguageDesc const* desc = GetLanguageDescByID(language);
+        if (!desc || desc->skill_id == 0)
+        {
+            handler->SendErrorMessage("{} is not a language anyone can know in part.", ProximityVoice::GetLanguageName(language));
+            return false;
+        }
+
+        uint32 const level = std::min<uint32>(*percent, 100);
+
+        if (level == 0)
+        {
+            if (target->HasSkill(desc->skill_id))
+                target->SetSkill(desc->skill_id, 0, 0, 0);
+        }
+        else
+        {
+            target->SetSkill(desc->skill_id, 0, uint16(level * 3), 300);
+        }
+
+        // The skill hook has already told the voice server; this is for the case where
+        // nothing changed on the skill but the session was somehow behind.
+        sProximityVoice->OnLanguagesChanged(target);
+
+        if (level == 0)
+            handler->PSendSysMessage("{} no longer knows |cffffffff{}|r.", target->GetName(), ProximityVoice::GetLanguageName(language));
+        else
+            handler->PSendSysMessage("{} now knows |cffffffff{}|r at {}%.", target->GetName(), ProximityVoice::GetLanguageName(language), level);
+
         return true;
     }
 

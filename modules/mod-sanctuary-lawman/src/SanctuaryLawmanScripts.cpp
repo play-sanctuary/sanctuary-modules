@@ -23,6 +23,9 @@
 
 #include "SanctuaryIdentity.h"
 #include "SanctuaryOutlaw.h"
+// Somebody unconscious holds still to be searched for the same reason somebody in irons
+// does, so the two states are asked about together.
+#include "SanctuaryDowned.h"
 
 #include "Chat.h"
 #include "Config.h"
@@ -488,58 +491,10 @@ public:
  * out loud is the whole feature. What changes hands afterwards is a trade, and a matter
  * between the two of them.
  */
-class sanctuary_lawman_search : public ItemScript
+namespace
 {
-public:
-    sanctuary_lawman_search() : ItemScript("sanctuary_lawman_search") { }
-
-    bool OnUse(Player* player, Item* item, SpellCastTargets const& targets) override
-    {
-        if (!player || !player->GetSession())
-            return true;
-
-        auto refuse = [&](std::string const& why)
-        {
-            // Without an error the client leaves the item greyed out and the player reads
-            // it as a cooldown rather than a refusal.
-            player->SendEquipError(EQUIP_ERR_CANT_DO_RIGHT_NOW, item, nullptr);
-            ChatHandler(player->GetSession()).PSendSysMessage("{}", why);
-            return true;
-        };
-
-        if (!g_enabled)
-            return refuse("The watch is not keeping order on this realm.");
-
-        // Selection first, falling back to whatever the packet carried - see the Writ of
-        // Accusation, which refused every accusation ever served by reading only the packet.
-        Unit* unit = targets.GetUnitTarget();
-        Player* prisoner = player->GetSelectedPlayer();
-
-        if (!prisoner && unit)
-            prisoner = unit->ToPlayer();
-
-        if (!prisoner)
-            return refuse("Select the person you mean to search.");
-
-        if (prisoner == player)
-            return refuse("You know what you are carrying.");
-
-        if (!SanctuaryLawman::IsShackled(prisoner))
-            return refuse("Only somebody in irons will hold still to be searched.");
-
-        if (!player->IsWithinDistInMap(prisoner, g_searchRange))
-            return refuse("Too far away to lay a hand on them.");
-
-        if (!player->IsWithinLOSInMap(prisoner))
-            return refuse("You cannot see them.");
-
-        Search(player, prisoner);
-        return true;
-    }
-
-private:
     /// One line per stack, as an item link, so the searcher can read the tooltip too.
-    static void Report(ChatHandler& to, Item const* held, uint32& found)
+    void ReportStack(ChatHandler& to, Item const* held, uint32& found)
     {
         ItemTemplate const* proto = held ? held->GetTemplate() : nullptr;
 
@@ -559,7 +514,7 @@ private:
      * anybody who asks, so listing it here would only be a second, worse copy of something
      * the client does properly.
      */
-    static void Search(Player* searcher, Player* prisoner)
+    void ReadOutPack(Player* searcher, Player* prisoner)
     {
         ChatHandler to(searcher->GetSession());
         uint32 found = 0;
@@ -568,12 +523,12 @@ private:
             SanctuaryIdentity::LabelFor(searcher, prisoner));
 
         for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
-            Report(to, prisoner->GetItemByPos(INVENTORY_SLOT_BAG_0, slot), found);
+            ReportStack(to, prisoner->GetItemByPos(INVENTORY_SLOT_BAG_0, slot), found);
 
         for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; ++bagSlot)
             if (Bag* bag = prisoner->GetBagByPos(bagSlot))
                 for (uint32 slot = 0; slot < bag->GetBagSize(); ++slot)
-                    Report(to, bag->GetItemByPos(uint8(slot)), found);
+                    ReportStack(to, bag->GetItemByPos(uint8(slot)), found);
 
         if (!found)
             to.PSendSysMessage("   Their pack is empty.");
@@ -590,6 +545,100 @@ private:
 
         LOG_INFO("module.sanctuarylawman", "{} searched {} ({} stack(s), {} copper).",
             searcher->GetName(), prisoner->GetName(), found, money);
+    }
+}
+
+namespace SanctuaryLawman
+{
+    /*
+     * One set of rules, whichever way the search was asked for.
+     *
+     * There are two ways in now - using the gloves from the pack, and the button the addon
+     * puts up when you target somebody who cannot walk away - and they must agree exactly,
+     * or the button becomes a way around a rule the item enforces. So both come through
+     * here and neither has a check of its own.
+     *
+     * Carrying the gloves is one of those rules rather than a consequence of how it was
+     * asked for: using an item proves possession, clicking a button proves nothing.
+     */
+    char const* SearchRefusal(Player* searcher, Player* prisoner)
+    {
+        if (!g_enabled)
+            return "The watch is not keeping order on this realm.";
+
+        if (!searcher || !searcher->GetSession())
+            return "You cannot do that.";
+
+        if (!prisoner)
+            return "Select the person you mean to search.";
+
+        if (prisoner == searcher)
+            return "You know what you are carrying.";
+
+        /*
+         * Carrying the gloves is NOT required.
+         *
+         * They were the authority to begin with, in the same way the writs and the irons
+         * are, but the state of the person being searched turns out to carry that weight
+         * on its own: somebody in irons or on the floor has already been put there by
+         * somebody, and going through their pack is the obvious next thing to reach for.
+         * Making it wait on an item in the bag meant the offer appeared for almost nobody.
+         *
+         * The gloves still work as a way to do it - their OnUse comes through here - they
+         * are simply no longer the price of admission.
+         */
+
+        // Being unconscious holds somebody still exactly as irons do, and it is the more
+        // common of the two - most people who get searched were put on the floor first.
+        if (!SanctuaryLawman::IsShackled(prisoner) && !SanctuaryDowned::IsDowned(prisoner))
+            return "Only somebody in irons or on the floor will hold still to be searched.";
+
+        if (!searcher->IsWithinDistInMap(prisoner, g_searchRange))
+            return "Too far away to lay a hand on them.";
+
+        if (!searcher->IsWithinLOSInMap(prisoner))
+            return "You cannot see them.";
+
+        return nullptr;
+    }
+
+    char const* Search(Player* searcher, Player* prisoner)
+    {
+        if (char const* why = SearchRefusal(searcher, prisoner))
+            return why;
+
+        ReadOutPack(searcher, prisoner);
+        return nullptr;
+    }
+}
+
+class sanctuary_lawman_search : public ItemScript
+{
+public:
+    sanctuary_lawman_search() : ItemScript("sanctuary_lawman_search") { }
+
+    bool OnUse(Player* player, Item* item, SpellCastTargets const& targets) override
+    {
+        if (!player || !player->GetSession())
+            return true;
+
+        // Selection first, falling back to whatever the packet carried - see the Writ of
+        // Accusation, which refused every accusation ever served by reading only the packet.
+        Unit* unit = targets.GetUnitTarget();
+        Player* prisoner = player->GetSelectedPlayer();
+
+        if (!prisoner && unit)
+            prisoner = unit->ToPlayer();
+
+        if (char const* why = SanctuaryLawman::Search(player, prisoner))
+        {
+            // Without an error the client leaves the item greyed out and the player reads
+            // it as a cooldown rather than a refusal.
+            player->SendEquipError(EQUIP_ERR_CANT_DO_RIGHT_NOW, item, nullptr);
+            ChatHandler(player->GetSession()).PSendSysMessage("{}", why);
+        }
+
+        return true;
     }
 };
 
@@ -690,6 +739,19 @@ public:
 
         if (msg.compare(marker.size(), 4, "SYNC") == 0)
             SanctuaryLawman::SendState(player);
+
+        /*
+         * "May I search whoever I have selected?"
+         *
+         * The addon used to answer this itself by looking for the shackle and bleed-out
+         * auras on the target, which duplicated a server rule on the client and got it
+         * wrong for unconscious players - the button simply never appeared for the case it
+         * was most wanted in. The server is the only thing that actually knows, so it is
+         * asked, and the reply is the same set of checks the search itself runs.
+         */
+        else if (msg.compare(marker.size(), 9, "CANSEARCH") == 0)
+            SendAddonPacket(player, SanctuaryLawman::SearchRefusal(player, player->GetSelectedPlayer())
+                ? "SEARCH ok=0" : "SEARCH ok=1");
 
         return false;
     }

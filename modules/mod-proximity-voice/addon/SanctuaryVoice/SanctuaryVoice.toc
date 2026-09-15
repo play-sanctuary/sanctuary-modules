@@ -2,7 +2,9 @@
 ## Title: Sanctuary Voice
 ## Notes: Shows who is speaking near you, and your proximity voice settings.
 ## Author: Sanctuary
-## Version: 2.5
+## Version: 2.9
 ## SavedVariablesPerCharacter: SanctuaryVoiceDB
+## OptionalDeps: NotPlater-3.3.5, NotPlater
 
+NotPlaterProfile.lua
 SanctuaryVoice.lua

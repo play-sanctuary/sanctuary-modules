@@ -176,6 +176,22 @@ SanctuaryLawman.Shackles.KeyEntry = 990002
 SanctuaryLawman.Shackles.CastSpell = 81001
 
 #
+#    SanctuaryLawman.Shackles.KeySpell
+#        Description: The five second cast that opens the irons again: 81008 "Unshackling",
+#                     the key's on-use spell. Sanctuary's own, like CastSpell - the client's
+#                     copy comes from patch-enUS-4.MPQ and the server's from the module's
+#                     world SQL, which also sets its cast time. It is watched like the
+#                     shackling cast, so walking out of reach interrupts it.
+#
+#                     This only tells the module which cast is the key's. The key item
+#                     (item_template 990002) casts whatever its spellid_1 names, which the
+#                     world SQL sets to 81008 - change one and the other must follow.
+#        Default:     81008
+#
+
+SanctuaryLawman.Shackles.KeySpell = 81008
+
+#
 #    SanctuaryLawman.Shackles.DisarmSpell
 #        Description: The aura applied to a shackled prisoner. 6608 "Dropped Weapon" is
 #                     SPELL_AURA_MOD_DISARM with a debuff name that reads correctly.

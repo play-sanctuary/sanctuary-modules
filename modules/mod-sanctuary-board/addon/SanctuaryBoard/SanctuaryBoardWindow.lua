@@ -210,7 +210,9 @@ local function OpenCompose(category)
 end
 
 StaticPopupDialogs["SANCTUARY_BOARD_TAKE_DOWN"] = {
-    text = "Take your notice down?",
+    -- "your notice", or "the notice by Grimwald" when a moderator is taking down somebody
+    -- else's: the confirmation should say whose it is, because that is the whole decision.
+    text = "Take %s down?",
     button1 = YES,
     button2 = NO,
     timeout = 0,
@@ -423,10 +425,15 @@ Refresh = function()
                 category.colour, category.name, Ago(post.postedAt), by))
             row.body:SetText(post.body or "")
 
-            if post.mine then
+            -- Yours, or anyone's if you are a moderator. Being told the author is the
+            -- server's per-row way of saying so: WHO is only ever sent to moderators.
+            if post.mine or post.author then
+                local whose = post.mine and "your notice"
+                    or ("the notice by " .. (string.match(post.author, "^(.-) %(guid") or post.author))
+
                 row.take:Show()
                 row.take:SetScript("OnClick", function()
-                    local dialog = StaticPopup_Show("SANCTUARY_BOARD_TAKE_DOWN")
+                    local dialog = StaticPopup_Show("SANCTUARY_BOARD_TAKE_DOWN", whose)
                     if dialog then dialog.postId = post.id end
                 end)
             else

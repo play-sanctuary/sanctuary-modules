@@ -69,8 +69,41 @@ public:
             { "",       HandleLawmanStatusCommand, RBAC_PERM_COMMAND_LAWMAN,               Console::No }
         };
 
-        static ChatCommandTable commandTable = { { "lawman", lawmanCommandTable } };
+        /*
+         * Its own command rather than a subcommand of lawman, because searching is not the
+         * office's to do - the gloves permit it and anyone holding them may search. Putting
+         * it under `.lawman` would say the opposite.
+         */
+        static ChatCommandTable commandTable =
+        {
+            { "lawman", lawmanCommandTable },
+            { "search", HandleSearchCommand, RBAC_PERM_COMMAND_LAWMAN, Console::No }
+        };
+
         return commandTable;
+    }
+
+    /*
+     * What the addon's button sends.
+     *
+     * It carries no argument: the target is the selection, which is the only thing the
+     * button could have meant. Every rule is in SanctuaryLawman::Search, so this cannot
+     * become a way around what the gloves enforce.
+     */
+    static bool HandleSearchCommand(ChatHandler* handler)
+    {
+        Player* player = handler->GetPlayer();
+
+        if (!player)
+            return false;
+
+        // Through the session, not the handler: the button sends this over the addon
+        // channel now, and a reply written to the handler would be returned to the addon
+        // rather than shown. The findings themselves already go out this way.
+        if (char const* why = SanctuaryLawman::Search(player, player->GetSelectedPlayer()))
+            ChatHandler(player->GetSession()).PSendSysMessage("{}", why);
+
+        return true;
     }
 
     static bool HandleLawmanStatusCommand(ChatHandler* handler)

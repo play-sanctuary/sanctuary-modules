@@ -41,6 +41,7 @@
 #include "AllSpellScript.h"
 #include "SpellInfo.h"
 #include "GameObjectScript.h"
+#include "GlobalScript.h"
 #include "Map.h"
 #include "Item.h"
 #include "ItemTemplate.h"
@@ -50,8 +51,11 @@
 #include "PlayerScript.h"
 #include "ScriptMgr.h"
 #include "WorldScript.h"
+#include "Opcodes.h"
+#include "WorldPacket.h"
 #include "WorldSession.h"
 
+#include <algorithm>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -67,6 +71,43 @@ namespace
     uint32 g_copyPrice = 10000;      ///> copper the locksmith charges for a duplicate
     uint32 g_locksmithText = 990200; ///> the npc_text he greets you with
     uint32 g_openSpell = 81011;      ///> the two second cast that works the lid open
+    uint32 g_lockpick = 990006;      ///> opens any one box, and is destroyed doing it
+
+    /*
+     * The longer cast for opening a box with a pick rather than a key.
+     *
+     * 81012 "Lockpicking" is Sanctuary's own: eight seconds, the kneel-and-work animation,
+     * and interrupted by movement, pushback, the interrupt school, autoattack and damage.
+     * It exists because a cast time cannot be varied per cast - Spell::m_casttime is
+     * protected with only a getter - so a slower pick has to be a different spell from the
+     * two second key.
+     *
+     * Two stock spells were tried first and each failed on something the server cannot
+     * reach. 21651 "Opening" is the only eight second opening spell in the game and carries
+     * SPELL_ATTR3_NO_CASTING_BAR_TEXT, so the bar runs with no word on it. 1809
+     * "Lockpicking" shows its name but has precast kit 0, so nothing is animated at all.
+     * Both flags are read from the client's own Spell.dbc.
+     *
+     * The global script below still neuters whatever this points at. That is not needed for
+     * 81012, whose row is already a dummy self-cast - it is kept so the setting can be
+     * pointed at a borrowed spell again without the module caring.
+     */
+    uint32 g_pickSpell = 81012;
+
+    /*
+     * Whether a key that would be stranded is REFUSED, or merely noted.
+     *
+     * Off by default, which is the deliberate answer to a real question: a strongbox is
+     * somewhere to put things, and a key is a thing. Refusing the deposit is safe and
+     * slightly patronising - it decides for the player that they did not mean it - and a
+     * stranded box is no longer unrecoverable anyway, because game master mode opens any
+     * lock.
+     *
+     * The check still runs either way. With this off it writes a line to the log and warns
+     * the player instead of stopping them, so a box that turns up stuck later can be
+     * explained from the log rather than guessed at.
+     */
+    bool g_refuseStrandedKeys = false;
 
     struct Stash
     {
@@ -86,6 +127,15 @@ namespace
     /// Who currently has which box open. Client messages name no box; this does, so a
     /// forged packet cannot reach into one the player never opened.
     std::unordered_map<ObjectGuid::LowType, ObjectGuid::LowType> g_open;
+
+    /*
+     * Players whose open box was opened with a pick rather than its key.
+     *
+     * The pick is gone by the time anything re-checks, so without this the box shuts on
+     * the first check after it opens. Membership lasts exactly as long as the box is
+     * open, and is dropped wherever g_open is.
+     */
+    std::unordered_set<ObjectGuid::LowType> g_picked;
 
     /// Who is part way through the two second cast, and which box they clicked.
     std::unordered_map<ObjectGuid::LowType, ObjectGuid::LowType> g_pending;
@@ -113,6 +163,71 @@ namespace
      */
     std::unordered_set<ObjectGuid::LowType> g_hasAddon;
     std::unordered_map<ObjectGuid::LowType, ObjectGuid> g_atLocksmith;
+
+    /*
+     * Whether `target` could still be got into, supposing key item `moving` were sitting
+     * inside box `into`.
+     *
+     * THE PROBLEM THIS SOLVES is a ring. Shutting a box's own key inside it is the obvious
+     * way to lose a box and is refused on sight, but two boxes can do the same thing to
+     * each other - A's key in B, B's key in A - and neither deposit looks wrong by itself.
+     * Three boxes can do it in a longer ring, and so on. Checking only the box in front of
+     * you cannot see any of that.
+     *
+     * So it is answered properly, as reachability. A box opens if one of its keys is loose
+     * - held by somebody, in a bank, in the mail, anywhere that is not inside a strongbox -
+     * or if one of its keys is inside a box that opens. Grow that set until it stops
+     * growing, and a box outside it is a box nobody can open.
+     *
+     * A pick or a game master still gets in; neither is counted here, because a rule that
+     * assumed a consumable item existed somewhere on the realm would be no rule at all.
+     *
+     * The realm holds a handful of boxes, so the loop is over a handful of entries and runs
+     * only when somebody deposits an actual key.
+     */
+    bool StillReachable(ObjectGuid::LowType target, ObjectGuid::LowType moving,
+                        ObjectGuid::LowType into)
+    {
+        // Where each key sits. Absent from this map means loose, which is what makes a box
+        // openable in the first place.
+        std::unordered_map<ObjectGuid::LowType, ObjectGuid::LowType> holding;
+
+        for (auto const& box : g_stashes)
+            for (auto const& held : box.second.items)
+                if (held.second && g_keys.count(held.second->GetGUID().GetCounter()))
+                    holding[held.second->GetGUID().GetCounter()] = box.first;
+
+        holding[moving] = into;                      // the deposit being considered
+
+        std::unordered_set<ObjectGuid::LowType> open;
+
+        // A box with no lock is a box anybody can open, and its contents are therefore in
+        // reach. Seeded first so keys kept in one count as loose.
+        for (auto const& box : g_stashes)
+            if (!box.second.keyItem)
+                open.insert(box.first);
+
+        for (bool grew = true; grew; )
+        {
+            grew = false;
+
+            for (auto const& binding : g_keys)
+            {
+                if (open.count(binding.second))
+                    continue;
+
+                auto where = holding.find(binding.first);
+
+                if (where == holding.end() || open.count(where->second))
+                {
+                    open.insert(binding.second);
+                    grew = true;
+                }
+            }
+        }
+
+        return open.count(target) > 0;
+    }
 
     Stash* Find(ObjectGuid::LowType guid)
     {
@@ -227,6 +342,96 @@ namespace
         return CarriedKeyFor(player, guid) != nullptr;
     }
 
+    /// A lockpick in the bags, or nothing. Bags only, for the reason CarriedKeyFor is.
+    Item* CarriedLockpick(Player* player)
+    {
+        if (!g_lockpick)
+            return nullptr;
+
+        for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
+            if (Item* held = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+                if (held->GetEntry() == g_lockpick)
+                    return held;
+
+        for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; ++bagSlot)
+            if (Bag* bag = player->GetBagByPos(bagSlot))
+                for (uint32 slot = 0; slot < bag->GetBagSize(); ++slot)
+                    if (Item* held = bag->GetItemByPos(uint8(slot)))
+                        if (held->GetEntry() == g_lockpick)
+                            return held;
+
+        return nullptr;
+    }
+
+    /*
+     * What this player would open this box with, or nothing.
+     *
+     * The cut key first and the pick only if nothing fits. That order is the whole rule:
+     * somebody carrying both opens the box with the key and still has the pick afterwards.
+     * Reversed, owning a pick would quietly cost one every time you opened your own box.
+     */
+    Item* KeyToOpen(Player* player, ObjectGuid::LowType guid)
+    {
+        if (Item* cut = CarriedKeyFor(player, guid))
+            return cut;
+
+        return CarriedLockpick(player);
+    }
+
+    /*
+     * Game master mode is a master key.
+     *
+     * It is GM *mode* rather than account rank, the same test the identity module uses:
+     * a game master playing with `.gm off` meets the same locks as anybody else, which is
+     * the point of the realm. Turning it on is the deliberate act.
+     *
+     * Nothing is spent and no key is looked for. Somebody staging a scene or checking what
+     * is inside a box should not have to cut themselves a key first - and, more to the
+     * point, should not quietly burn a lockpick they happen to be carrying to do it.
+     */
+    bool OpensAnything(Player const* player)
+    {
+        return player && player->IsGameMaster();
+    }
+
+    /// Whether this player can open this box at all, by key, by pick, or by being a GM.
+    bool CanOpen(Player* player, ObjectGuid::LowType guid)
+    {
+        return OpensAnything(player) || KeyToOpen(player, guid) != nullptr;
+    }
+
+    /*
+     * Which cast opens this box for this player - the short one, or the long one.
+     *
+     * A key is a key: it is cut for this lock, it turns, and the two seconds are the time
+     * it takes to lift the lid. A pick is not, and eight seconds of kneeling in front of
+     * somebody else's strongbox is the whole point of it - long enough that a thief has to
+     * choose their moment, and long enough for anybody walking past to notice and stop it.
+     *
+     * The pick's spell breaks on damage as well as on movement, so being hit halfway
+     * through costs the attempt and nothing else. The pick itself is only spent when the
+     * cast lands, so an interrupted pick is still in the pack afterwards.
+     *
+     * Everything else takes the short cast: an unlocked box, a keyholder, and a game
+     * master, who is opening it with neither and should not be kept waiting for a lock
+     * they are not really picking.
+     */
+    uint32 OpeningSpellFor(Player* player, ObjectGuid::LowType guid)
+    {
+        if (!g_pickSpell)
+            return g_openSpell;
+
+        Stash const* stash = Find(guid);
+
+        if (!stash || !stash->keyItem || OpensAnything(player))
+            return g_openSpell;
+
+        if (CarriedKeyFor(player, guid))
+            return g_openSpell;
+
+        return CarriedLockpick(player) ? g_pickSpell : g_openSpell;
+    }
+
     /// Cuts a key for a box and hands it over. The entry is only its appearance.
     Item* CutKey(Player* player, ObjectGuid::LowType guid, uint32 entry)
     {
@@ -300,7 +505,13 @@ namespace
             return nullptr;
         }
 
-        if (stash->keyItem && !CarriesKeyFor(player, open->second))
+        /*
+         * Not asked of somebody who picked it. They spent a pick to get in, which is a
+         * better claim than a key they might still be carrying - and the pick is destroyed,
+         * so asking would shut the box on the first check after it opened.
+         */
+        if (stash->keyItem && !g_picked.count(player->GetGUID().GetCounter())
+            && !CanOpen(player, open->second))
         {
             *why = "You no longer have the key.";
             return nullptr;
@@ -340,8 +551,40 @@ namespace
         return false;
     }
 
+    /*
+     * Answering a question the client did not know to ask.
+     *
+     * A client draws an item from its own cache, and that cache holds only what it has been
+     * sent - which for anything in a strongbox is nothing, because the item has never been
+     * in a bag, on a vendor or in a loot window. So the addon was given a row it could name
+     * but not draw, and every slot came up as a question mark until the player hovered one:
+     * a tooltip is the one thing in the client that sends CMSG_ITEM_QUERY_SINGLE itself.
+     *
+     * The server has the answer in hand and no reason to wait for the question. This is the
+     * same packet the client would have received had it asked, built by the same handler -
+     * synthesising the request is what keeps it one call rather than a copy of the hundred
+     * fields ItemHandler.cpp writes.
+     */
+    void TeachClientAboutItem(Player* player, uint32 entry)
+    {
+        if (!player || !player->GetSession() || !entry)
+            return;
+
+        WorldPacket ask(CMSG_ITEM_QUERY_SINGLE, 4);
+        ask << entry;
+
+        player->GetSession()->HandleItemQuerySingleOpcode(ask);
+    }
+
     void SendContents(Player* player, ObjectGuid::LowType guid, Stash const& stash)
     {
+        // BEFORE the rows, not after: both travel the same connection in order, so by the
+        // time the addon is told what is in slot 4 the client already knows how to draw it
+        // and there is nothing to correct afterwards.
+        for (auto const& held : stash.items)
+            if (held.second)
+                TeachClientAboutItem(player, held.second->GetEntry());
+
         std::ostringstream open;
         open << "OPEN " << guid << " " << uint32(stash.slots) << " " << stash.name;
         SendAddonPacket(player, open.str());
@@ -373,7 +616,55 @@ namespace
      * player while its stash row survives would be in two places at once, which is the only
      * way a container like this can mint items.
      */
-    void Withdraw(Player* player, ObjectGuid::LowType guid, Stash& stash, uint8 slot)
+    /*
+     * The inverse of ToCoreSlot: where the client would say an item is.
+     *
+     * Needed because the client is about to be asked to pick the item up, and
+     * PickupContainerItem speaks the client's numbering - backpack 0, worn bags 1 to 4,
+     * slots counted from one. Getting this wrong does not error; it picks up whatever else
+     * happens to be at that position, which is a far worse way to be wrong.
+     */
+    bool ToClientSlot(uint8 bag, uint8 slot, uint32& clientBag, uint32& clientSlot)
+    {
+        if (bag == INVENTORY_SLOT_BAG_0)
+        {
+            if (slot < INVENTORY_SLOT_ITEM_START || slot >= INVENTORY_SLOT_ITEM_END)
+                return false;                        // equipped, bank, or somewhere we do not reach
+
+            clientBag = 0;
+            clientSlot = uint32(slot - INVENTORY_SLOT_ITEM_START) + 1;
+            return true;
+        }
+
+        if (bag < INVENTORY_SLOT_BAG_START || bag >= INVENTORY_SLOT_BAG_END)
+            return false;
+
+        clientBag = uint32(bag - INVENTORY_SLOT_BAG_START) + 1;
+        clientSlot = uint32(slot) + 1;
+        return true;
+    }
+
+    /*
+     * `toCursor` is the difference between a left click and a right click in the window.
+     *
+     * A right click just takes the item, the way it always has. A left click is asked to
+     * behave like a left click on a bag item: the thing ends up ON THE CURSOR.
+     *
+     * The client will not do that for a strongbox, and cannot be made to. Picking an item
+     * up is implemented in the client's own code and exposed only for containers it owns -
+     * PickupContainerItem, PickupInventoryItem, PickupGuildBankItem - and a strongbox is a
+     * server-side idea the client has never heard of. There is no Lua call that puts an
+     * arbitrary item on the cursor, which is why the guild bank needed an API of its own
+     * rather than being written as an addon.
+     *
+     * So the item is taken out FIRST and then picked up out of the bag it landed in, which
+     * is a real cursor holding the real item and works everywhere a cursor works - the
+     * trade window, the mail, a bag. The one visible difference from a bag: letting go of
+     * it somewhere invalid drops it back in the BAG rather than into the box, because by
+     * then that is honestly where it lives.
+     */
+    void Withdraw(Player* player, ObjectGuid::LowType guid, Stash& stash, uint8 slot,
+                  bool toCursor = false)
     {
         auto held = stash.items.find(slot);
 
@@ -387,11 +678,45 @@ namespace
 
         if (space != EQUIP_ERR_OK)
         {
-            player->SendEquipError(space, item, nullptr);
+            /*
+             * A full bag is a REFUSAL for a right click and a FORK for a left one.
+             *
+             * Right click asked for the item in the bags, and it cannot go there: that is
+             * the client's own "Inventory is full", said the way every other container
+             * says it. A left click asked to hold the item, and the window has a second
+             * way to do that which needs no bag space at all - lifting it inside the box -
+             * so it is told to take that instead. Reporting a full inventory there would
+             * be describing a failure that is about to not happen.
+             *
+             * The server is the one that decides, because it is the only side that can:
+             * whether an item fits depends on stack merging and on bag families, and the
+             * addon can see neither. CanStoreItem above has already worked it out.
+             */
+            if (toCursor)
+                SendAddonPacket(player, "NOROOM " + std::to_string(uint32(slot)));
+            else
+                player->SendEquipError(space, item, nullptr);
+
             return;
         }
 
         stash.items.erase(slot);
+
+        /*
+         * Read everything wanted from the item BEFORE storing it, because storing can
+         * destroy it.
+         *
+         * Player::StoreItem merges a stack into an identical one already in the bags
+         * rather than taking a slot of its own, and the incoming Item is then marked
+         * ITEM_REMOVED. Item::SaveToDB ends that case with `delete this` - so by the time
+         * SaveInventoryAndGoldToDB below returns, this pointer is freed memory.
+         *
+         * Taking the FIRST stack out of a box was always safe: with nothing to merge into
+         * it lands in an empty slot and survives. The second stack of the same item is
+         * what merges, frees, and then crashed the realm on the logging line underneath.
+         */
+        uint32 const entry = item->GetEntry();
+        uint32 const count = item->GetCount();
 
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
         trans->Append("DELETE FROM `sanctuary_stash_item` WHERE `stash` = {} AND `slot` = {}",
@@ -404,10 +729,436 @@ namespace
 
         CharacterDatabase.CommitTransaction(trans);
 
+        // `item` is not touched past this point. It may not exist.
         SendAddonPacket(player, "TAKEN " + std::to_string(slot));
 
+        /*
+         * Where it landed, so the window can put it on the cursor.
+         *
+         * dest was filled by CanStoreItem above and StoreItem honoured it, so it names the
+         * position without having to search the bags for the item afterwards - which would
+         * be wrong anyway when the stack merged into one that was already there.
+         *
+         * A merged stack is picked up whole. That is the client's behaviour for bags too:
+         * there is no way to pick up part of a stack without the split dialog.
+         */
+        if (toCursor && !dest.empty())
+        {
+            uint8 const landedBag = dest[0].pos >> 8;
+            uint8 const landedSlot = dest[0].pos & 255;
+
+            uint32 clientBag = 0, clientSlot = 0;
+
+            if (ToClientSlot(landedBag, landedSlot, clientBag, clientSlot))
+                SendAddonPacket(player, "CURSOR " + std::to_string(clientBag) + " "
+                                        + std::to_string(clientSlot));
+        }
+
         LOG_INFO("module.sanctuarystash", "{} took {} x{} out of strongbox {}.",
-            player->GetName(), item->GetEntry(), item->GetCount(), guid);
+            player->GetName(), entry, count, guid);
+    }
+
+    /*
+     * How much of `moving` would pour into `into`, or zero if the two do not stack.
+     *
+     * Same entry and room left is the whole test. Anything that carries state of its own -
+     * durability, enchantments, charges - has a maximum stack of one in its template, so it
+     * can never be the destination and never needs to be compared field by field.
+     */
+    uint32 StackableInto(Item const* moving, Item const* into)
+    {
+        if (!moving || !into || moving == into)
+            return 0;
+
+        if (moving->GetEntry() != into->GetEntry())
+            return 0;
+
+        uint32 const most = into->GetMaxStackCount();
+
+        if (most <= 1 || into->GetCount() >= most)
+            return 0;
+
+        return std::min(most - into->GetCount(), moving->GetCount());
+    }
+
+    /*
+     * Moves an item from one slot of a box to another, or swaps the two.
+     *
+     * NOTHING LEAVES THE BOX, which is the entire point of it existing. Withdrawing needs
+     * a free bag slot and refuses without one, so rearranging a full strongbox by taking
+     * items out and putting them back was impossible exactly when it was most wanted. This
+     * touches no inventory at all: the items stay ownerless where they are and only the
+     * rows saying which slot they sit in change.
+     *
+     * It is also the one operation here that cannot fail for want of space, so there is no
+     * error path - only "there is nothing there", which the window should not have sent.
+     */
+    void MoveWithin(Player* player, ObjectGuid::LowType guid, Stash& stash, uint8 from, uint8 to)
+    {
+        if (from == to || from >= stash.slots || to >= stash.slots)
+            return;
+
+        auto source = stash.items.find(from);
+
+        if (source == stash.items.end() || !source->second)
+            return Tell(player, "There is nothing in that slot.");
+
+        Item* moving = source->second;
+
+        auto target = stash.items.find(to);
+        Item* displaced = (target != stash.items.end()) ? target->second : nullptr;
+
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+
+        /*
+         * Two stacks of the same thing combine rather than trading places.
+         *
+         * Swapping them would be the literal reading of "put this there" and the wrong one:
+         * dropping forty linen onto twenty linen means sixty linen everywhere else in the
+         * game, and a box that refused to do it would be the only container on the realm
+         * that did not.
+         *
+         * A partial merge is a real outcome, not an error - fill the destination to its
+         * maximum and leave the remainder where it was.
+         */
+        if (uint32 const poured = StackableInto(moving, displaced))
+        {
+            displaced->SetCount(displaced->GetCount() + poured);
+            displaced->FSetState(ITEM_CHANGED);
+            displaced->SaveToDB(trans);
+
+            bool const emptied = (poured == moving->GetCount());
+
+            // Read before the save below, which may free the item.
+            uint32 const movingEntry = moving->GetEntry();
+            uint32 const leftBehind = moving->GetCount() - poured;
+
+            if (emptied)
+            {
+                trans->Append("DELETE FROM `sanctuary_stash_item` WHERE `stash` = {} AND `slot` = {}",
+                    guid, uint32(from));
+
+                stash.items.erase(from);
+
+                // ITEM_REMOVED ends SaveToDB with `delete this`, so `moving` is not touched
+                // after this line - the same hazard Withdraw documents.
+                moving->FSetState(ITEM_REMOVED);
+                moving->SaveToDB(trans);
+            }
+            else
+            {
+                moving->SetCount(leftBehind);
+                moving->FSetState(ITEM_CHANGED);
+                moving->SaveToDB(trans);
+            }
+
+            CharacterDatabase.CommitTransaction(trans);
+
+            std::ostringstream filled;
+            filled << "SLOT " << uint32(to) << " " << displaced->GetEntry() << " " << displaced->GetCount();
+            SendAddonPacket(player, filled.str());
+
+            if (emptied)
+            {
+                SendAddonPacket(player, "TAKEN " + std::to_string(uint32(from)));
+            }
+            else
+            {
+                std::ostringstream rest;
+                rest << "SLOT " << uint32(from) << " " << movingEntry << " " << leftBehind;
+                SendAddonPacket(player, rest.str());
+            }
+
+            LOG_INFO("module.sanctuarystash", "{} merged {} of {} into slot {} of strongbox {}.",
+                player->GetName(), poured, movingEntry, uint32(to), guid);
+
+            return;
+        }
+
+        // Both rows go before either is written. The primary key is (stash, slot), so
+        // writing the destination first would collide with whatever is standing there.
+        trans->Append("DELETE FROM `sanctuary_stash_item` WHERE `stash` = {} AND `slot` IN ({}, {})",
+            guid, uint32(from), uint32(to));
+
+        trans->Append("INSERT INTO `sanctuary_stash_item` (`stash`, `slot`, `item_guid`) VALUES ({}, {}, {})",
+            guid, uint32(to), moving->GetGUID().GetCounter());
+
+        if (displaced)
+            trans->Append("INSERT INTO `sanctuary_stash_item` (`stash`, `slot`, `item_guid`) VALUES ({}, {}, {})",
+                guid, uint32(from), displaced->GetGUID().GetCounter());
+
+        CharacterDatabase.CommitTransaction(trans);
+
+        stash.items[to] = moving;
+
+        if (displaced)
+            stash.items[from] = displaced;
+        else
+            stash.items.erase(from);
+
+        // Both slots are redrawn, in the order that leaves the window right whichever way
+        // round the move was.
+        std::ostringstream moved;
+        moved << "SLOT " << uint32(to) << " " << moving->GetEntry() << " " << moving->GetCount();
+        SendAddonPacket(player, moved.str());
+
+        if (displaced)
+        {
+            std::ostringstream back;
+            back << "SLOT " << uint32(from) << " " << displaced->GetEntry() << " " << displaced->GetCount();
+            SendAddonPacket(player, back.str());
+        }
+        else
+        {
+            SendAddonPacket(player, "TAKEN " + std::to_string(uint32(from)));
+        }
+
+        LOG_INFO("module.sanctuarystash", "{} moved {} from slot {} to slot {} in strongbox {}.",
+            player->GetName(), moving->GetEntry(), uint32(from), uint32(to), guid);
+    }
+
+    /*
+     * Swaps a strongbox slot with a bag slot, the way the bank does.
+     *
+     * One in, one out, in a single step. That matters for the same reason MoveWithin does:
+     * a swap needs no free space, because the two items change places, whereas doing it by
+     * hand - withdraw, then deposit - needs a spare bag slot for the middle of the
+     * operation and is refused on a full bag.
+     *
+     * The bag item is lifted out FIRST so the slot is free, then the box item is stored
+     * into that exact position rather than wherever the bags have room. Storing to a named
+     * slot also avoids the merge-and-free hazard that Withdraw documents: nothing is
+     * merged into an existing stack, so no Item is deleted underneath us.
+     *
+     * An empty bag slot is a withdrawal to a chosen slot, and is allowed - it is what
+     * clicking an empty square in the bank does.
+     */
+    void SwapWithBag(Player* player, ObjectGuid::LowType guid, Stash& stash, uint8 slot,
+                     uint8 bag, uint8 bagSlot)
+    {
+        auto held = stash.items.find(slot);
+
+        if (held == stash.items.end() || !held->second)
+            return Tell(player, "There is nothing in that slot.");
+
+        Item* boxItem = held->second;
+        Item* bagItem = player->GetItemByPos(bag, bagSlot);
+
+        // The same rules a deposit answers to. A bag with things in it, a soulbound item or
+        // something being worn cannot go into a box, so it cannot be swapped into one
+        // either.
+        if (bagItem)
+        {
+            if (bagItem->IsBag() && !((Bag*)bagItem)->IsEmpty())
+                return Tell(player, "Empty the bag first.");
+
+            if (bagItem->IsSoulBound())
+                return Tell(player, "Soulbound things cannot be left for somebody else.");
+
+            if (bagItem->IsEquipped())
+                return Tell(player, "Take it off first.");
+        }
+
+        /*
+         * The same rule against a bag stack: pour rather than exchange.
+         *
+         * Done before anything is moved, because a merge is not a swap and shares none of
+         * the steps below - the bag item stays exactly where it is and only its count
+         * changes, which the client picks up from the item's own update fields.
+         */
+        if (uint32 const poured = StackableInto(boxItem, bagItem))
+        {
+            CharacterDatabaseTransaction merge = CharacterDatabase.BeginTransaction();
+
+            bagItem->SetCount(bagItem->GetCount() + poured);
+            bagItem->FSetState(ITEM_CHANGED);
+            bagItem->SaveToDB(merge);
+
+            bool const emptied = (poured == boxItem->GetCount());
+
+            uint32 const movedEntry = boxItem->GetEntry();
+            uint32 const leftBehind = boxItem->GetCount() - poured;
+
+            if (emptied)
+            {
+                merge->Append("DELETE FROM `sanctuary_stash_item` WHERE `stash` = {} AND `slot` = {}",
+                    guid, uint32(slot));
+
+                stash.items.erase(slot);
+
+                boxItem->FSetState(ITEM_REMOVED);
+                boxItem->SaveToDB(merge);       // may free it; not touched afterwards
+            }
+            else
+            {
+                boxItem->SetCount(leftBehind);
+                boxItem->FSetState(ITEM_CHANGED);
+                boxItem->SaveToDB(merge);
+            }
+
+            player->SaveInventoryAndGoldToDB(merge);
+            CharacterDatabase.CommitTransaction(merge);
+
+            if (emptied)
+                SendAddonPacket(player, "TAKEN " + std::to_string(uint32(slot)));
+            else
+            {
+                std::ostringstream rest;
+                rest << "SLOT " << uint32(slot) << " " << movedEntry << " " << leftBehind;
+                SendAddonPacket(player, rest.str());
+            }
+
+            LOG_INFO("module.sanctuarystash", "{} merged {} of {} out of strongbox {} into their bags.",
+                player->GetName(), poured, movedEntry, guid);
+
+            return;
+        }
+
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+
+        uint32 const outEntry = boxItem->GetEntry();
+        uint32 const outCount = boxItem->GetCount();
+
+        if (bagItem)
+        {
+            // Out of the bags and into the box's row, ownerless the way every stored item is.
+            player->MoveItemFromInventory(bag, bagSlot, true);
+            bagItem->DeleteFromInventoryDB(trans);
+            bagItem->SetGuidValue(ITEM_FIELD_CONTAINED, ObjectGuid::Empty);
+            bagItem->SetGuidValue(ITEM_FIELD_OWNER, ObjectGuid::Empty);
+            bagItem->FSetState(ITEM_NEW);
+            bagItem->SaveToDB(trans);
+        }
+
+        // The bag slot is free now, so the box item goes exactly there.
+        ItemPosCountVec dest;
+        InventoryResult space = player->CanStoreItem(bag, bagSlot, dest, boxItem, false);
+
+        if (space != EQUIP_ERR_OK)
+        {
+            // Nothing has been committed, so letting the transaction go unsent puts
+            // everything back. The bag item is restored from its row at the next load.
+            player->SendEquipError(space, boxItem, nullptr);
+            return;
+        }
+
+        trans->Append("DELETE FROM `sanctuary_stash_item` WHERE `stash` = {} AND `slot` = {}",
+            guid, uint32(slot));
+
+        stash.items.erase(slot);
+
+        if (bagItem)
+        {
+            trans->Append("INSERT INTO `sanctuary_stash_item` (`stash`, `slot`, `item_guid`) "
+                          "VALUES ({}, {}, {})", guid, uint32(slot), bagItem->GetGUID().GetCounter());
+
+            stash.items[slot] = bagItem;
+        }
+
+        player->StoreItem(dest, boxItem, true);
+        player->SaveInventoryAndGoldToDB(trans);
+
+        CharacterDatabase.CommitTransaction(trans);
+
+        // `boxItem` is not read past this point, for the reason Withdraw gives.
+        if (bagItem)
+        {
+            std::ostringstream line;
+            line << "SLOT " << uint32(slot) << " " << bagItem->GetEntry() << " " << bagItem->GetCount();
+            SendAddonPacket(player, line.str());
+        }
+        else
+        {
+            SendAddonPacket(player, "TAKEN " + std::to_string(uint32(slot)));
+        }
+
+        LOG_INFO("module.sanctuarystash", "{} swapped {} x{} out of strongbox {} for what was "
+            "in bag {} slot {}.", player->GetName(), outEntry, outCount, guid,
+            uint32(bag), uint32(bagSlot));
+    }
+
+    /// The lowest slot in this box with nothing standing in it, or slots when it is full.
+    uint8 FirstFreeSlot(Stash const& stash)
+    {
+        for (uint8 slot = 0; slot < stash.slots; ++slot)
+            if (!stash.items.count(slot))
+                return slot;
+
+        return stash.slots;
+    }
+
+    /*
+     * Splits a stack in the box into two, without either half leaving it.
+     *
+     * The same reasoning as MoveWithin and SwapWithBag: doing this by hand means taking
+     * the stack out, splitting it in the bags and putting both halves back, which needs
+     * two free bag slots and is refused on a full one. Here nothing leaves the box, so the
+     * only thing that can be short is a slot in the box itself.
+     *
+     * The new half is a genuinely new item rather than a second row pointing at the same
+     * one. Two rows for one item guid would be two slots showing the same stack, and
+     * withdrawing either would take both.
+     */
+    void SplitStack(Player* player, ObjectGuid::LowType guid, Stash& stash, uint8 slot, uint32 count)
+    {
+        auto held = stash.items.find(slot);
+
+        if (held == stash.items.end() || !held->second)
+            return Tell(player, "There is nothing in that slot.");
+
+        Item* source = held->second;
+
+        // Splitting off everything is not a split, and splitting off more than is there is
+        // not possible. Both are the window asking for something it should not have.
+        if (!count || count >= source->GetCount())
+            return;
+
+        uint8 const target = FirstFreeSlot(stash);
+
+        if (target >= stash.slots)
+            return Tell(player, "|cffff4040The strongbox is full.|r There is nowhere to put half of it.");
+
+        Item* half = Item::CreateItem(source->GetEntry(), count, player);
+
+        if (!half)
+            return Tell(player, "That will not come apart.");
+
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+
+        source->SetCount(source->GetCount() - count);
+        source->FSetState(ITEM_CHANGED);
+        source->SaveToDB(trans);
+
+        /*
+         * Ownerless, like everything else in a box.
+         *
+         * CreateItem takes a player only to seed the item's random properties; it does not
+         * put it in their bags and it does not set an owner. Both fields are cleared anyway
+         * so this reads the same as the deposit path, which is the other place an item
+         * becomes the box's rather than somebody's.
+         */
+        half->SetGuidValue(ITEM_FIELD_CONTAINED, ObjectGuid::Empty);
+        half->SetGuidValue(ITEM_FIELD_OWNER, ObjectGuid::Empty);
+        half->FSetState(ITEM_NEW);
+        half->SaveToDB(trans);
+
+        trans->Append("INSERT INTO `sanctuary_stash_item` (`stash`, `slot`, `item_guid`) VALUES ({}, {}, {})",
+            guid, uint32(target), half->GetGUID().GetCounter());
+
+        CharacterDatabase.CommitTransaction(trans);
+
+        stash.items[target] = half;
+
+        std::ostringstream left;
+        left << "SLOT " << uint32(slot) << " " << source->GetEntry() << " " << source->GetCount();
+        SendAddonPacket(player, left.str());
+
+        std::ostringstream made;
+        made << "SLOT " << uint32(target) << " " << half->GetEntry() << " " << half->GetCount();
+        SendAddonPacket(player, made.str());
+
+        LOG_INFO("module.sanctuarystash", "{} split {} off a stack of {} in strongbox {}, into slot {}.",
+            player->GetName(), count, source->GetCount() + count, guid, uint32(target));
     }
 
     void SaveMoney(ObjectGuid::LowType guid, Stash const& stash)
@@ -520,9 +1271,6 @@ namespace
         if (slot >= stash.slots)
             return Tell(player, "That is not a slot in this strongbox.");
 
-        if (stash.items.count(slot))
-            return Tell(player, "Something is in that slot already.");
-
         Item* item = player->GetItemByPos(bag, bagSlot);
 
         if (!item)
@@ -536,6 +1284,105 @@ namespace
 
         if (item->IsEquipped())
             return Tell(player, "Take it off first.");
+
+        /*
+         * Onto a stack already in the box: pour, do not refuse.
+         *
+         * This is the third place the same rule lives - MoveWithin pours box into box and
+         * SwapWithBag pours box into bag - and it became reachable from the window the day
+         * a left click started handing the item to the cursor: "click this stack, click
+         * that stack" now arrives here as a deposit onto an occupied slot, where it used
+         * to arrive as a move. A box that answered "something is in that slot already" to
+         * forty linen dropped on twenty linen would be the only container on the realm
+         * that did.
+         *
+         * The bag stack is the one that shrinks. Fully poured, it leaves the bags the way
+         * any used-up stack does; partly poured, only its count changes and the client
+         * reads that off the item's own fields. Nothing about the box item moves - it is
+         * the same ownerless row with a bigger count.
+         */
+        if (auto occupied = stash.items.find(slot); occupied != stash.items.end() && occupied->second)
+        {
+            Item* boxItem = occupied->second;
+            uint32 const poured = StackableInto(item, boxItem);
+
+            if (!poured)
+                return Tell(player, "Something is in that slot already.");
+
+            // Read before anything that may free the bag item.
+            uint32 const entry = item->GetEntry();
+            uint32 const held = item->GetCount();
+            bool const emptied = (poured == held);
+
+            CharacterDatabaseTransaction merge = CharacterDatabase.BeginTransaction();
+
+            boxItem->SetCount(boxItem->GetCount() + poured);
+            boxItem->FSetState(ITEM_CHANGED);
+            boxItem->SaveToDB(merge);
+
+            if (emptied)
+            {
+                // Through the player, not the item: this is what using up a stack does,
+                // and it is what tells the client the slot is empty now.
+                player->DestroyItem(bag, bagSlot, true);
+            }
+            else
+            {
+                item->SetCount(held - poured);
+                item->SetState(ITEM_CHANGED, player);
+            }
+
+            // Writes the bag side - the shrunk count, or the deletion - in the same
+            // transaction as the box side, so the two cannot disagree after a crash.
+            player->SaveInventoryAndGoldToDB(merge);
+            CharacterDatabase.CommitTransaction(merge);
+
+            // `item` is not touched past this point: the save deletes a used-up stack.
+            std::ostringstream line;
+            line << "SLOT " << uint32(slot) << " " << boxItem->GetEntry() << " " << boxItem->GetCount();
+            SendAddonPacket(player, line.str());
+
+            LOG_INFO("module.sanctuarystash", "{} poured {} of {} from their bags into slot {} of strongbox {}.",
+                player->GetName(), poured, entry, uint32(slot), guid);
+
+            return;
+        }
+
+        /*
+         * A key going somewhere it could not be got back out of.
+         *
+         * Allowed, and said out loud. A strongbox is somewhere to put things and a key is a
+         * thing; refusing decides for the player that they did not mean it, and the case is
+         * recoverable regardless since game master mode opens any lock.
+         *
+         * The check is still run, because knowing costs almost nothing - a walk over a
+         * handful of boxes, only when the item really is a key - and because a box reported
+         * as stuck a week later is otherwise a mystery. Set
+         * SanctuaryStash.RefuseStrandedKeys to put the refusal back.
+         */
+        auto binding = g_keys.find(item->GetGUID().GetCounter());
+
+        if (binding != g_keys.end() && !StillReachable(binding->second, binding->first, guid))
+        {
+            bool const ownBox = (binding->second == guid);
+
+            if (g_refuseStrandedKeys)
+                return Tell(player, ownBox
+                    ? "|cffff4040That is the key to this strongbox.|r "
+                      "Shut it inside and nobody opens it again."
+                    : "|cffff4040That key would be shut away for good.|r "
+                      "The box it opens holds the only way back to it.");
+
+            Tell(player, ownBox
+                ? "|cffffcc00That is this strongbox's own key.|r "
+                  "Only a lockpick or a game master opens it after this."
+                : "|cffffcc00Nothing else reaches that key now.|r "
+                  "Only a lockpick or a game master opens the box it belongs to.");
+
+            LOG_INFO("module.sanctuarystash",
+                "{} shut key {} (opens strongbox {}) into strongbox {} - that box is now "
+                "unreachable by key.", player->GetName(), binding->first, binding->second, guid);
+        }
 
         uint32 const entry = item->GetEntry();
         uint32 const count = item->GetCount();
@@ -601,23 +1448,25 @@ public:
             return true;
         }
 
-        if (stash->keyItem && !CarriesKeyFor(player, go->GetSpawnId()))
+        if (stash->keyItem && !CanOpen(player, go->GetSpawnId()))
         {
             Tell(player, "|cffff4040It is locked.|r Whoever has its key can open it.");
             return true;
         }
 
         /*
-         * Two seconds of work, rather than a window appearing the instant it is clicked.
+         * Work, rather than a window appearing the instant the box is clicked.
          *
          * The spell carries the animation as well as the delay - visual 180 is what the
          * client already plays for chests and lockboxes - and it carries the interrupt, so
          * walking off cancels it without this module watching for that. Everything is
-         * checked again when the cast lands, because two seconds is long enough to step
-         * away, be killed, or have the key taken.
+         * checked again when the cast lands, because even two seconds is long enough to
+         * step away, be killed, or have the key taken.
+         *
+         * Two seconds with a key, eight with a pick. See OpeningSpellFor.
          */
         g_pending[player->GetGUID().GetCounter()] = go->GetSpawnId();
-        player->CastSpell(player, g_openSpell, false);
+        player->CastSpell(player, OpeningSpellFor(player, go->GetSpawnId()), false);
 
         return true;                                  // no gossip menu; the window is the UI
     }
@@ -642,6 +1491,7 @@ public:
 
         ObjectGuid::LowType const was = g_open[player->GetGUID().GetCounter()];
         g_open.erase(player->GetGUID().GetCounter());
+        g_picked.erase(player->GetGUID().GetCounter());
         SetLid(player, was, false);
     }
 
@@ -766,12 +1616,14 @@ public:
         }
 
         /*
-         * Turning the key, from the minimap button.
+         * Turning the key.
          *
-         * Answered before the "must have a box open" gate, because the button is on the
-         * minimap and not on the window - somebody standing at a locked box they hold the key
-         * to has nothing open yet, and that is exactly when they want to unlock it. So the
-         * box is resolved by where they are standing rather than by what they have open.
+         * Answered before the "must have a box open" gate, and the box is resolved by where
+         * the player is standing rather than by what they have open. That outlived the
+         * minimap button it was written for: the key now lives on the strongbox window,
+         * shown only to whoever carries it, and a locked box opens for its keyholder anyway,
+         * so there is no longer a moment with nothing open. Resolving by proximity still
+         * means the one box within reach is the one whose lock turns.
          *
          * The only gate is the key in their hand. This is the first thing a player can do to
          * a box rather than to its contents: leave a cache unlocked for your crew and anyone
@@ -825,6 +1677,7 @@ public:
         {
             ObjectGuid::LowType const was = g_open[player->GetGUID().GetCounter()];
             g_open.erase(player->GetGUID().GetCounter());
+            g_picked.erase(player->GetGUID().GetCounter());
             SetLid(player, was, false);
             return false;
         }
@@ -839,6 +1692,7 @@ public:
                 ObjectGuid::LowType const was = g_open[player->GetGUID().GetCounter()];
                 Tell(player, why);
                 g_open.erase(player->GetGUID().GetCounter());
+                g_picked.erase(player->GetGUID().GetCounter());
                 SetLid(player, was, false);
                 SendAddonPacket(player, "SHUT");
             }
@@ -854,10 +1708,42 @@ public:
         else if (verb == "TAKE")
         {
             uint32 slot = MAX_SLOTS;
-            body >> slot;
+            uint32 toCursor = 0;                     // absent from an older addon, so 0
+            body >> slot >> toCursor;
 
             if (slot < stash->slots)
-                Withdraw(player, guid, *stash, uint8(slot));
+                Withdraw(player, guid, *stash, uint8(slot), toCursor != 0);
+        }
+        else if (verb == "MOVE")
+        {
+            uint32 from = MAX_SLOTS, to = MAX_SLOTS;
+            body >> from >> to;
+
+            if (from < stash->slots && to < stash->slots)
+                MoveWithin(player, guid, *stash, uint8(from), uint8(to));
+        }
+        else if (verb == "SPLIT")
+        {
+            uint32 slot = MAX_SLOTS, count = 0;
+            body >> slot >> count;
+
+            if (slot < stash->slots)
+                SplitStack(player, guid, *stash, uint8(slot), count);
+        }
+        else if (verb == "SWAP")
+        {
+            uint32 slot = MAX_SLOTS, clientBag = 0, clientSlot = 0;
+            body >> slot >> clientBag >> clientSlot;
+
+            uint8 coreBag = 0, coreSlot = 0;
+
+            if (slot >= stash->slots)
+                return false;
+
+            if (!ToCoreSlot(player, clientBag, clientSlot, coreBag, coreSlot))
+                Tell(player, "That is not a place you can reach.");
+            else
+                SwapWithBag(player, guid, *stash, uint8(slot), coreBag, coreSlot);
         }
         else if (verb == "PUTMONEY" || verb == "TAKEMONEY")
         {
@@ -952,7 +1838,10 @@ public:
         g_objectEntry = sConfigMgr->GetOption<uint32>("SanctuaryStash.ObjectEntry", 990100);
         g_copyPrice = sConfigMgr->GetOption<uint32>("SanctuaryStash.Locksmith.Price", 10000);
         g_locksmithText = sConfigMgr->GetOption<uint32>("SanctuaryStash.Locksmith.TextId", 990200);
+        g_lockpick = sConfigMgr->GetOption<uint32>("SanctuaryStash.Lockpick.Entry", 990006);
         g_openSpell = sConfigMgr->GetOption<uint32>("SanctuaryStash.OpenSpell", 81011);
+        g_pickSpell = sConfigMgr->GetOption<uint32>("SanctuaryStash.Lockpick.OpenSpell", 81012);
+        g_refuseStrandedKeys = sConfigMgr->GetOption<bool>("SanctuaryStash.RefuseStrandedKeys", false);
     }
 
     void OnStartup() override
@@ -1011,7 +1900,21 @@ public:
          * but a stale row inheriting a recycled one would hand somebody a key they never
          * cut, and this costs a single statement at startup.
          */
-        CharacterDatabase.Execute(
+        /*
+         * DirectExecute, or this sweep does not do the job it is here for.
+         *
+         * DatabaseWorkerPool::Execute ENQUEUES on the async worker while the SELECT below
+         * runs synchronously on a connection of its own, so g_keys was being filled from
+         * the very rows this statement is meant to delete. The table came out clean and
+         * the map did not, which is the half that decides whether an item opens a box -
+         * and it stayed wrong until the NEXT restart.
+         *
+         * That is not theoretical. The dev realm reached MAX(item guid) 144 while carrying
+         * a stale binding for guid 147: the item generator starts at MAX+1, so the next
+         * few items created would have included 147, and it would have opened somebody's
+         * locked strongbox without anybody cutting a key.
+         */
+        CharacterDatabase.DirectExecute(
             "DELETE k FROM `sanctuary_stash_key` k "
             "LEFT JOIN `item_instance` i ON i.`guid` = k.`item_guid` "
             "WHERE i.`guid` IS NULL");
@@ -1174,7 +2077,12 @@ public:
 
         // Exact, now that a key is bound to one box rather than to a kind of box. Two keys
         // that look identical can open different strongboxes, and each says which.
-        if (Stash const* stash = Find(BoxFor(item)))
+        // The pick is not cut for anything, so the usual answer would be "opens nothing"
+        // - true of a key that has lost its box, and wrong about a pick that opens any.
+        if (g_lockpick && item->GetEntry() == g_lockpick)
+            handler.PSendSysMessage(
+                "It will turn one lock, whichever you like, and break doing it.");
+        else if (Stash const* stash = Find(BoxFor(item)))
             handler.PSendSysMessage("This key opens |cffffffff{}|r.", stash->name);
         else
             handler.PSendSysMessage("This key opens nothing you know of.");
@@ -1367,7 +2275,10 @@ public:
 
     void OnSpellCast(Spell* /*spell*/, Unit* caster, SpellInfo const* spellInfo, bool /*skipCheck*/) override
     {
-        if (!g_enabled || !spellInfo || spellInfo->Id != g_openSpell)
+        if (!g_enabled || !spellInfo)
+            return;
+
+        if (spellInfo->Id != g_openSpell && (!g_pickSpell || spellInfo->Id != g_pickSpell))
             return;
 
         Player* player = caster ? caster->ToPlayer() : nullptr;
@@ -1392,12 +2303,126 @@ public:
         if (!player->IsWithinDistInMap(box, g_range))
             return Tell(player, "You are not close enough to reach into it.");
 
-        if (stash->keyItem && !CarriesKeyFor(player, guid))
+        /*
+         * A game master opens it without looking for anything to open it with.
+         *
+         * Deliberately not "find a key, and fall back to GM": KeyToOpen returns the
+         * lockpick when nothing else fits, and the spend below would then destroy a pick
+         * out of a game master's pack every time they looked inside a locked box.
+         */
+        bool const master = OpensAnything(player);
+
+        Item* used = (stash->keyItem && !master) ? KeyToOpen(player, guid) : nullptr;
+
+        if (stash->keyItem && !used && !master)
             return Tell(player, "|cffff4040It is locked.|r Whoever has its key can open it.");
+
+        /*
+         * The pick is spent here and nowhere else.
+         *
+         * Here, because this is the only point at which the box actually opens - the checks
+         * before it can fail or be walked away from, and spending it there would cost
+         * somebody a pick for a lid that never lifted. And only when the pick is what
+         * opened it: KeyToOpen returns a cut key first, so carrying both spends neither.
+         */
+        if (used && g_lockpick && used->GetEntry() == g_lockpick)
+        {
+            player->DestroyItemCount(g_lockpick, 1, true);
+            Tell(player, "The pick turns the lock and snaps off in it.");
+
+            // Remembered, or the next check would shut what the pick just opened.
+            g_picked.insert(player->GetGUID().GetCounter());
+        }
 
         g_open[player->GetGUID().GetCounter()] = guid;
         SetLid(player, guid, true);
         SendContents(player, guid, *stash);
+    }
+};
+
+/*
+ * Turns the borrowed lockpick spell into a timer.
+ *
+ * 21651 is a stock "Opening" and the only one in the game with an eight second cast. It is
+ * borrowed rather than written because a cast time cannot be varied per cast - Spell has
+ * m_casttime protected with only a getter - so a longer pick had to be a different spell,
+ * and a NEW spell would have needed a row in the client's own Spell.dbc as well as the
+ * server's. That is a client patch and a redownload for every player, for eight seconds.
+ *
+ * What it already carries is exactly right: 8000ms flat, and interrupt flags 31, which is
+ * movement, pushback, interrupt, autoattack and complete-interrupt-on-damage. Being hit
+ * halfway through a lock costs the attempt.
+ *
+ * What has to go is the effect. The stock one is SPELL_EFFECT_OPEN_LOCK aimed at
+ * TARGET_GAMEOBJECT_TARGET - it would refuse to cast at all with a player as its target,
+ * and if it did land it would work a real lock rather than sit there being a delay. This
+ * module opens the box itself when the cast finishes, so the spell needs to do nothing.
+ *
+ * Done here rather than in SQL for the reason the lawman module gives: spell_dbc is loaded
+ * with SELECT * and replaces the whole row, so a partial insert zeroes every column it
+ * leaves out.
+ */
+class sanctuary_stash_globalscript : public GlobalScript
+{
+public:
+    sanctuary_stash_globalscript() : GlobalScript("sanctuary_stash_globalscript",
+        { GLOBALHOOK_ON_LOAD_SPELL_CUSTOM_ATTR }) { }
+
+    void OnLoadSpellCustomAttr(SpellInfo* spell) override
+    {
+        if (!spell || !g_pickSpell || spell->Id != g_pickSpell)
+            return;
+
+        spell->Effects[EFFECT_0].Effect = SPELL_EFFECT_DUMMY;
+        spell->Effects[EFFECT_0].TargetA = SpellImplicitTargetInfo(TARGET_UNIT_CASTER);
+        spell->Effects[EFFECT_0].TargetB = SpellImplicitTargetInfo(0);
+
+        /*
+         * Stated rather than assumed. The stock row already asks for both of these, but a
+         * pick that cannot be interrupted is a different feature from the one intended,
+         * and this is the line that says so out loud.
+         */
+        spell->InterruptFlags |= SPELL_INTERRUPT_FLAG_MOVEMENT | SPELL_INTERRUPT_FLAG_ABORT_ON_DMG;
+
+        /*
+         * And the target mask is recomputed, which is the line that makes the rest work.
+         *
+         * SpellMgr::LoadSpellInfoCustomAttributes calls _InitializeExplicitTargetMask at
+         * SpellMgr.cpp:3556 and only then hands the spell to this hook, at 3583. So the
+         * mask this spell carries was worked out from the effect it had BEFORE the lines
+         * above changed it - OPEN_LOCK aimed at TARGET_GAMEOBJECT_TARGET - and it therefore
+         * says the spell needs a gameobject and no unit.
+         *
+         * Spell::SelectImplicitCasterDestTargets then reads that mask, and its
+         * EFFECT_IMPLICIT_TARGET_CASTER branch (Spell.cpp:2065) only resolves to the caster
+         * `if (targetMask & TARGET_FLAG_UNIT_MASK)`. With a gameobject mask and a player as
+         * the target, nothing is selected and the cast dies before the bar appears - which
+         * is exactly what a lockpick did: the box refused to open and said nothing.
+         *
+         * Recomputing it here rebuilds the mask from the dummy self-cast the spell now is.
+         *
+         * mod-sanctuary-lawman rewrites a target in the same hook and does NOT need this,
+         * because the spell it borrows was aimed at a unit to begin with and its mask
+         * already carried a unit flag. That is luck rather than design, and worth knowing
+         * before borrowing a third spell.
+         */
+        /*
+         * The DBC's own target flags go first, because they SEED the mask.
+         *
+         * _InitializeExplicitTargetMask starts with `uint32 targetMask = Targets`
+         * (SpellInfo.cpp:3002) and only then folds in what the effects ask for. 21651
+         * carries Targets 0x4000, TARGET_FLAG_GAMEOBJECT_ITEM, so recomputing alone left
+         * the mask still demanding an object - and Spell::InitExplicitTargets then throws
+         * the target away: a player is a Unit, the mask has no unit flag, so line 738 calls
+         * RemoveObjectTarget and the cast dies as "Invalid target".
+         *
+         * Zero is what a self-cast dummy wants, and it is what Sanctuary's own 81011 has -
+         * that spell's row names no Targets column at all, which is exactly why the two
+         * second open has always worked while this one did not.
+         */
+        spell->Targets = 0;
+
+        spell->_InitializeExplicitTargetMask();
     }
 };
 
@@ -1431,6 +2456,7 @@ public:
             { "name",   HandleStashName,   rbac::RBAC_PERM_COMMAND_MODIFY_FACTION, Console::No  },
             { "remove", HandleStashRemove, rbac::RBAC_PERM_COMMAND_MODIFY_FACTION, Console::No  },
             { "rotate", HandleStashRotate, rbac::RBAC_PERM_COMMAND_MODIFY_FACTION, Console::No  },
+            { "pick",   HandleStashPick,   rbac::RBAC_PERM_COMMAND_MODIFY_FACTION, Console::No  },
             { "rebuild", HandleStashRebuild, rbac::RBAC_PERM_COMMAND_MODIFY_FACTION, Console::No  },
             { "list",   HandleStashList,   rbac::RBAC_PERM_COMMAND_MODIFY_FACTION, Console::Yes },
             { "reload", HandleStashReload, rbac::RBAC_PERM_COMMAND_MODIFY_FACTION, Console::Yes }
@@ -1635,14 +2661,44 @@ public:
 
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(entry);
 
-        Say(handler, Acore::StringFormat("|cffffffff{}|r now opens only for |cff00ff96{}|r ({}).",
-            stash->name, proto->Name1, entry));
+        // Not "only": a pick opens anything once, so promising exclusivity here would be
+        // a lie the first time somebody used one.
+        Say(handler, Acore::StringFormat("|cffffffff{}|r now opens for |cff00ff96{}|r ({}), "
+            "or for anyone with a lockpick to spend.", stash->name, proto->Name1, entry));
 
         // A key in the hand, cut for THIS box, so it can be tested without a second command.
         if (CutKey(player, guid, entry))
             Say(handler, "A key for it is in your pack.");
         else
             Say(handler, "No room in your pack for the key - cut one with the panel later.");
+
+        return true;
+    }
+
+    /*
+     * `.stash pick` - a lockpick in the hand.
+     *
+     * The panel's key icons all lock a box WITH that key, which a pick can never be: it is
+     * not cut for anything, and setting it as a box's key would make a lock that its own
+     * kind opens. So it is reached this way instead, and the panel gets a button of its own.
+     */
+    static bool HandleStashPick(ChatHandler* handler)
+    {
+        Player* player = handler->GetPlayer();
+
+        if (!player)
+            return false;
+
+        if (!g_lockpick)
+        {
+            Say(handler, "Lockpicks are switched off on this realm.");
+            return true;
+        }
+
+        if (player->AddItem(g_lockpick, 1))
+            Say(handler, "A lockpick is in your pack. One box, and it does not survive.");
+        else
+            Say(handler, "No room in your pack for it.");
 
         return true;
     }
@@ -1917,6 +2973,7 @@ void AddSC_sanctuary_stash_scripts()
 {
     new sanctuary_stash();
     new sanctuary_stash_commandscript();
+    new sanctuary_stash_globalscript();
     new sanctuary_stash_key();
     new sanctuary_stash_locksmith();
     new sanctuary_stash_open_spell();

@@ -1,0 +1,67 @@
+[worldserver]
+
+#
+#    SanctuaryMinimap.Enable
+#        Description: Pins for the place kinds the minimap can only track one of at a
+#                     time - mailbox, banker, repair, the vendors and trainers. With this
+#                     off the addon's menu still stacks tracking SPELLS, which need
+#                     nothing from the server; only the pins go away.
+#        Default:     1
+#
+
+SanctuaryMinimap.Enable = 1
+
+#
+#    SanctuaryMinimap.Addon.Prefix
+#        Description: The addon message prefix both halves answer to. Changing it here
+#                     means changing PREFIX in SanctuaryMinimap.lua with it, or the two
+#                     stop hearing each other.
+#        Default:     "SMM"
+#
+
+SanctuaryMinimap.Addon.Prefix = "SMM"
+
+#
+#    SanctuaryMinimap.Radius
+#        Description: How far around a tracking player to look, in yards. The minimap's
+#                     widest view is a little over 230 yards across - so 115 from the
+#                     middle - and the rest is room for the second of movement between
+#                     pushes. Raising this searches more grid for pins that are off the
+#                     map anyway.
+#        Default:     150.0
+#
+
+SanctuaryMinimap.Radius = 150.0
+
+#
+#    SanctuaryMinimap.PinsPerKind
+#        Description: Most pins of any one kind. A city has more mailboxes than a minimap
+#                     has room for, and the nearest are kept, so this is what stops one
+#                     kind's crowd from starving another of its pin.
+#        Default:     6
+#
+
+SanctuaryMinimap.PinsPerKind = 6
+
+#
+#    SanctuaryMinimap.PinsTotal
+#        Description: Most pins in one answer, across all kinds - every kind ticked at
+#                     once in a city would otherwise be fifteen times the above. The addon
+#                     holds the same number (MAX_PINS in SanctuaryMinimap.lua) and the two
+#                     are meant to agree.
+#        Default:     40
+#
+
+SanctuaryMinimap.PinsTotal = 40
+
+#
+#    SanctuaryMinimap.IntervalMs
+#        Description: How often a tracking player is sent their pins. Each push is one
+#                     grid search for that player, and nothing is searched for a player
+#                     tracking nothing. The addon slides the pins along in between from
+#                     its own map position, so a longer interval costs accuracy while
+#                     moving rather than pins. Floored at 250.
+#        Default:     1000
+#
+
+SanctuaryMinimap.IntervalMs = 1000

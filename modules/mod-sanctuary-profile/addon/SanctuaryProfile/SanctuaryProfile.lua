@@ -383,8 +383,8 @@ end
 ]]
 
 local MINIMAP_RADIUS = 80
--- Measured off a live minimap, not guessed. The four Sanctuary buttons share one arc:
--- outlaw -113.04, stash -132.70, disguise -151.64, profile -171.25.
+-- Measured off a live minimap, not guessed. The Sanctuary buttons share one arc:
+-- outlaw -113.04, lawman -132.01, disguise -151.64, profile -171.25. Faction is not on it; it sits by itself at -17.59.
 local DEFAULT_ANGLE = -171.25
 
 local minimapButton = CreateFrame("Button", "SanctuaryProfileMinimapButton", Minimap)

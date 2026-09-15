@@ -79,11 +79,132 @@ local function Send(message)
 end
 
 --------------------------------------------------------------------------
+-- Picking up what the server just handed over
+--------------------------------------------------------------------------
+
+--[[
+    Waits for an item to appear in a bag slot, then puts it on the cursor.
+
+    The client will not hand a strongbox item to the cursor - pickup is its own code and
+    only containers it owns are exposed - so the server takes the item out first and says
+    where it landed. The catch is that "where it landed" arrives before the item does.
+
+    A frame watcher rather than BAG_UPDATE, because BAG_UPDATE fires for the bag as a whole
+    and would have to be filtered anyway; polling one slot for a few frames is smaller and
+    says what it is waiting for.
+]]
+-- Named so the harness can drive it: the timing this guards cannot be tested any other
+-- way, because it is entirely about which of two packets arrives first.
+local cursorWatcher = CreateFrame("Frame", "SanctuaryStashCursorWatcher")
+local cursorWait = nil
+
+local CURSOR_TIMEOUT = 1.5
+
+cursorWatcher:Hide()
+
+cursorWatcher:SetScript("OnUpdate", function(self, elapsed)
+    if not cursorWait then
+        self:Hide()
+        return
+    end
+
+    cursorWait.waited = cursorWait.waited + (elapsed or 0)
+
+    local texture = GetContainerItemInfo(cursorWait.bag, cursorWait.slot)
+
+    if texture then
+        -- Not if something is already held: the player picked something else up while we
+        -- were waiting, and replacing it would drop whatever that was.
+        if not CursorHasItem() then
+            PickupContainerItem(cursorWait.bag, cursorWait.slot)
+        end
+
+        cursorWait = nil
+        self:Hide()
+        return
+    end
+
+    if cursorWait.waited > CURSOR_TIMEOUT then
+        cursorWait = nil
+        self:Hide()
+    end
+end)
+
+function WaitForItem(bag, slot)
+    if not bag or not slot then return end
+
+    cursorWait = { bag = bag, slot = slot, waited = 0 }
+    cursorWatcher:Show()
+end
+
+--------------------------------------------------------------------------
 -- The window
 --------------------------------------------------------------------------
 
-local function SlotClicked(self)
+--[[
+    Which strongbox slot the window is holding, if any.
+
+    The bank puts the item on the cursor and lets you drop it in another bank slot. The
+    client will not do that for a strongbox - pickup is exposed only for containers it owns
+    - so the window holds it instead: click to lift, click again to place. The item never
+    moves until the second click, and never leaves the box at all.
+
+    This is the answer to needing a free bag slot to rearrange a full box, which was the
+    thing that made taking-it-out-and-putting-it-back useless precisely when it mattered.
+]]
+local heldStashSlot = nil
+
+-- Set by the window so the bag-click override can see it without reaching backwards
+-- through the file. Returned rather than exposed, because nothing outside should set it.
+local function HeldSlot() return heldStashSlot end
+
+local function SetHeld(slot)
+    heldStashSlot = slot
+
+    for index = 0, slotCount - 1 do
+        local button = buttons[index + 1]
+
+        if button then
+            -- Faded rather than emptied: it has not moved yet, and showing it gone would
+            -- be a lie until the server says so.
+            SetItemButtonDesaturated(button, slot ~= nil and index == slot)
+        end
+    end
+end
+
+--[[
+    Splitting a stack, using the game's own dialog.
+
+    OpenStackSplitFrame hands the frame it is given back through SplitStack when the player
+    accepts, so a button of ours can raise the real dialog rather than imitating one - the
+    slider, the arrows, Enter and Escape all behave as they do for a bag, because they ARE
+    the ones from a bag.
+
+    The split happens inside the box. Doing it by hand would mean taking the stack out,
+    splitting it in the bags and putting both halves back, which needs two free bag slots
+    and is refused on a full one.
+]]
+local function SlotSplitAccepted(self, count)
+    if count and count > 0 then
+        Send(string.format("SPLIT %d %d", self:GetID(), count))
+    end
+end
+
+local function SlotClicked(self, button)
     local slot = self:GetID()
+
+    -- Shift-click splits, the way it does everywhere else, and NEVER does anything else.
+    -- Returning unconditionally matters: without it a shift-click on a single item fell
+    -- through to the lift below, so the slot was quietly picked up by a gesture that was
+    -- asking to divide it - and stayed held, aimed at whatever was clicked next.
+    if IsShiftKeyDown() and button ~= "RightButton" then
+        if self.entry and (self._count or 1) > 1 then
+            self.SplitStack = SlotSplitAccepted
+            OpenStackSplitFrame(self._count, self, "BOTTOMLEFT", "TOPLEFT")
+        end
+
+        return
+    end
 
     if CursorHasItem() then
         if heldBag and heldSlot then
@@ -95,8 +216,54 @@ local function SlotClicked(self)
         return
     end
 
+    -- Placing what the window is holding. Empty slot or occupied, the server swaps them.
+    if heldStashSlot ~= nil and button ~= "RightButton" then
+        local from = heldStashSlot
+        SetHeld(nil)
+
+        if from ~= slot then
+            Send(string.format("MOVE %d %d", from, slot))
+        end
+
+        return
+    end
+
+    --[[
+        Left click asks for the item ON THE CURSOR, the way it works in a bag.
+
+        Which cannot be done here without the item leaving the box first - the client only
+        picks up out of containers it owns - so this is a request rather than an action,
+        and the server answers it one of two ways. Room in the bags: the item comes out and
+        CURSOR says where it landed. No room: NOROOM comes back and the item is lifted
+        INSIDE the box instead, which is the one way of holding it that costs no bag space.
+
+        The fallback is not a lesser version of the gesture. It is the arrangement that
+        made rearranging a full box possible in the first place, and a full box is exactly
+        when somebody is rearranging one.
+    ]]
+    if self.entry and button ~= "RightButton" then
+        Send("TAKE " .. slot .. " 1")
+        return
+    end
+
     if self.entry then
-        Send("TAKE " .. slot)
+        --[[
+            Right click takes it out, and that is ALL it does.
+
+            It used to hand the item to the cursor as well, which was left over from before
+            left click could lift anything: back then the cursor was the only way to put an
+            item somewhere chosen, so the one gesture that existed had to do both jobs. Now
+            that left click lifts, right click is the plain one - the same bargain the bank
+            and the bags strike, where right click means "just put it away" and does not
+            leave you holding something you then have to find a home for.
+
+            The server can still deliver to the cursor; it is the trailing flag, and the
+            CURSOR reply and its watcher above stay for it. Nothing asks for it today.
+
+            OnReceiveDrag arrives with no button argument, so anything that is not
+            explicitly RightButton is treated as the left one.
+        ]]
+        Send("TAKE " .. slot .. " 0")
     end
 end
 
@@ -198,6 +365,17 @@ local function EnsureSlots(count)
         if not buttons[index] then
             local button = CreateFrame("Button", "SanctuaryStashSlot" .. index, frame, "ItemButtonTemplate")
             button:SetID(index - 1)                      -- the server counts from zero
+
+            -- Both buttons, so a slot answers a right-click the same way it answers a
+            -- left one. A frame fires OnClick for the left button alone until told
+            -- otherwise, which is why right-clicking a slot previously did nothing at all
+            -- - SlotClicked never looked at which button was pressed, so the handler was
+            -- always willing; it simply was never called.
+            --
+            -- This is the other half of right-clicking a bag item to put it in: the same
+            -- gesture now moves an item either way across the window.
+            button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
             button:SetScript("OnClick", SlotClicked)
             button:SetScript("OnEnter", SlotEnter)
             button:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -225,20 +403,125 @@ local function EnsureSlots(count)
     frame:SetHeight(90 + rows * (SLOT_SIZE + PADDING))    -- 34 of that is the coin row
 end
 
+--[[
+    An icon the client does not have YET.
+
+    GetItemInfo answers out of the client's own item cache, and that cache only holds what
+    this character has already been shown. A strongbox is full of things that have never
+    been in a bag, so the first look inside one after logging in - which is every look, on
+    the evening of a restart - draws a wall of question marks.
+
+    The server now volunteers that data as it opens a box, so this should never fire. It
+    stays as the recovery path for anything the server missed, and because the first
+    version of it was wrong in a way worth writing down:
+
+    GetItemInfo does NOT go and fetch. On this client it reads the cache and returns nil if
+    the answer is not there, and nothing about the call makes the client go looking - so
+    asking again, and again, gets nil forever. What sends CMSG_ITEM_QUERY_SINGLE is a
+    TOOLTIP being told to show the item, which is why the icons appeared the moment the
+    player hovered one and not a second before. So the hover happens here, on a tooltip
+    that is never shown, and the cache is then polled for the answer landing. There is no
+    event for that on 3.3.5 - GET_ITEM_INFO_RECEIVED is a later client.
+]]
+-- Owned by UIParent and anchored nowhere: it exists to make the client speak, not to be
+-- looked at.
+local scanner = CreateFrame("GameTooltip", "SanctuaryStashItemScanner", nil,
+    "GameTooltipTemplate")
+
+local function AskClientAbout(entry)
+    if not scanner.SetHyperlink then return end      -- no tooltip, no query to send
+
+    scanner:SetOwner(UIParent, "ANCHOR_NONE")
+    scanner:SetHyperlink("item:" .. entry)
+    scanner:Hide()
+end
+-- Named for the same reason as the cursor watcher: what it guards is a race, and a race
+-- cannot be tested except by driving the frame that waits on it.
+local iconWatcher = CreateFrame("Frame", "SanctuaryStashIconWatcher")
+local iconWait = {}          -- [button] = the entry that button is still waiting for
+local iconWaited = 0
+local iconTick = 0
+
+local ICON_TIMEOUT = 8       -- an answer that has not arrived by now is not coming
+local ICON_INTERVAL = 0.2    -- each retry re-asks the server, so not every frame
+
+iconWatcher:Hide()
+
+iconWatcher:SetScript("OnUpdate", function(self, elapsed)
+    iconWaited = iconWaited + (elapsed or 0)
+    iconTick = iconTick + (elapsed or 0)
+
+    if iconTick < ICON_INTERVAL then return end
+    iconTick = 0
+
+    local outstanding = false
+
+    for button, entry in pairs(iconWait) do
+        if button.entry ~= entry then
+            -- The slot was refilled while we waited; whatever is in it now asked for
+            -- itself, and answering with the old item's icon would be worse than nothing.
+            iconWait[button] = nil
+        else
+            local _, _, _, _, _, _, _, _, _, texture = GetItemInfo(entry)
+
+            if texture then
+                SetItemButtonTexture(button, texture)
+                iconWait[button] = nil
+            else
+                -- Asked again rather than merely checked: a query can go unanswered, and a
+                -- check on its own would wait out the whole timeout for a reply nobody is
+                -- sending.
+                AskClientAbout(entry)
+                outstanding = true
+            end
+        end
+    end
+
+    if not outstanding or iconWaited > ICON_TIMEOUT then
+        iconWait = {}
+        self:Hide()
+    end
+end)
+
+local function DrawIcon(button, entry)
+    local _, _, _, _, _, _, _, _, _, texture = GetItemInfo(entry)
+
+    if texture then
+        iconWait[button] = nil
+        SetItemButtonTexture(button, texture)
+        return
+    end
+
+    -- A placeholder rather than an empty slot, because an empty slot reads as "nothing
+    -- here" and something is very much here.
+    SetItemButtonTexture(button, "Interface\\Icons\\INV_Misc_QuestionMark")
+
+    AskClientAbout(entry)
+
+    iconWait[button] = entry
+    iconWaited = 0
+    iconTick = 0
+    iconWatcher:Show()
+end
+
 local function SetSlot(index, entry, count)
     local button = buttons[index + 1]
     if not button then return end
 
     button.entry = entry
 
+    -- Kept because the split dialog is opened with the stack's size and there is no other
+    -- way to ask a button what it is showing.
+    button._count = count
+
     if not entry then
+        iconWait[button] = nil
         SetItemButtonTexture(button, nil)
         SetItemButtonCount(button, 0)
         return
     end
 
-    local _, _, _, _, _, _, _, _, _, texture = GetItemInfo(entry)
-    SetItemButtonTexture(button, texture or "Interface\\Icons\\INV_Misc_QuestionMark")
+    DrawIcon(button, entry)
     SetItemButtonCount(button, count or 1)
 end
 
@@ -309,6 +592,37 @@ local function Handle(message)
     elseif verb == "TAKEN" then
         local slot = tonumber(rest)
         if slot then SetSlot(slot, nil, 0) end
+
+    elseif verb == "NOROOM" then
+        -- The bags are full, so the left click becomes a lift inside the box. Said out
+        -- loud: the item staying put looks like the click was ignored, and the fade alone
+        -- does not explain why this one behaved differently from the last one.
+        local slot = tonumber(rest)
+
+        if slot then
+            SetHeld(slot)
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "|cff00ff96Strongbox:|r your bags are full, so it is being moved inside the box.")
+        end
+
+    elseif verb == "CURSOR" then
+        --[[
+            Where the server put it - but not yet, because the item is not there yet.
+
+            This arrives as a whisper, sent the moment the server has stored the item. The
+            item's ARRIVAL travels separately, in the next object update block, and reaches
+            the client after this does. Picking up straight away therefore picks up an
+            empty slot and the item simply stays in the bag, which is exactly what it did.
+
+            So the slot is watched instead, and the pickup happens on the frame the item
+            actually appears. WaitForItem gives up after a moment rather than watching for
+            ever: if it never arrives the item is in a bag somewhere and no worse off.
+        ]]
+        local bag, slot = string.match(rest, "^(%d+) (%d+)$")
+
+        if bag then
+            WaitForItem(tonumber(bag), tonumber(slot))
+        end
 
     elseif verb == "SHUT" then
         if frame then frame:Hide() end
@@ -438,91 +752,6 @@ OpenBench = function(price)
 end
 
 --------------------------------------------------------------------------
--- The key on the minimap
---------------------------------------------------------------------------
-
---[[
-    A key that turns the lock of whichever strongbox you are standing at, if you are carrying
-    its key. It lives on the minimap rather than on the strongbox window for a plain reason:
-    a locked box you hold the key to has no window open yet, and that is precisely the moment
-    you want to unlock it.
-
-    The button decides nothing. It sends LOCK and the server works out which box you are at,
-    whether you hold its key, and which way the lock should turn.
-]]
-
-local minimapButton
-
-local function PlaceOnRing(angle)
-    -- 80 is the radius the stock minimap buttons sit at. cos/sin in this client take degrees.
-    minimapButton:SetPoint("CENTER", Minimap, "CENTER",
-        80 * cos(angle), 80 * sin(angle))
-end
-
-local function BuildMinimapButton()
-    if minimapButton then return end
-
-    minimapButton = CreateFrame("Button", "SanctuaryStashMinimapButton", Minimap)
-    minimapButton:SetWidth(31)
-    minimapButton:SetHeight(31)
-    minimapButton:SetFrameStrata("MEDIUM")
-    minimapButton:SetFrameLevel(8)
-    minimapButton:RegisterForClicks("LeftButtonUp")
-    minimapButton:RegisterForDrag("LeftButton")
-    minimapButton:SetMovable(true)
-
-    local icon = minimapButton:CreateTexture(nil, "BACKGROUND")
-    icon:SetWidth(20)
-    icon:SetHeight(20)
-    icon:SetTexture("Interface\\Icons\\INV_Misc_Key_03")
-    icon:SetPoint("TOPLEFT", minimapButton, "TOPLEFT", 7, -5)
-    minimapButton.icon = icon
-
-    local border = minimapButton:CreateTexture(nil, "OVERLAY")
-    border:SetWidth(53)
-    border:SetHeight(53)
-    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    border:SetPoint("TOPLEFT", minimapButton, "TOPLEFT", 0, 0)
-
-    minimapButton:SetScript("OnClick", function() Send("LOCK") end)
-
-    minimapButton:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Strongbox key")
-        GameTooltip:AddLine("Turns the lock of the strongbox you are standing at, if you are "
-            .. "carrying its key. Drag to move it around the minimap.", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    -- Dragged around the ring rather than freely, so it behaves like every other minimap
-    -- button and cannot be lost behind the world frame.
-    minimapButton:SetScript("OnDragStart", function(self)
-        self:SetScript("OnUpdate", function()
-            local mx, my = Minimap:GetCenter()
-            local cx, cy = GetCursorPosition()
-            local scale = UIParent:GetEffectiveScale()
-
-            cx, cy = cx / scale, cy / scale
-
-            SanctuaryStashDB = SanctuaryStashDB or {}
-            SanctuaryStashDB.minimapAngle = math.deg(math.atan2(cy - my, cx - mx))
-
-            PlaceOnRing(SanctuaryStashDB.minimapAngle)
-        end)
-    end)
-
-    minimapButton:SetScript("OnDragStop", function(self)
-        self:SetScript("OnUpdate", nil)
-    end)
-
-    SanctuaryStashDB = SanctuaryStashDB or {}
-    -- Measured off a live minimap, not guessed. The four Sanctuary buttons share one arc:
-    -- outlaw -113.04, stash -132.70, disguise -151.64, profile -171.25.
-    PlaceOnRing(SanctuaryStashDB.minimapAngle or -132.70)
-end
-
---------------------------------------------------------------------------
 -- The game master's side
 --------------------------------------------------------------------------
 
@@ -587,7 +816,7 @@ local function BuildGMPanel()
     -- of Reload by 42 pixels - which is the sort of thing that is obvious in the game and
     -- invisible in the source.
     gmPanel:SetWidth(360)
-    gmPanel:SetHeight(282)
+    gmPanel:SetHeight(318)
     gmPanel:SetPoint("CENTER", UIParent, "CENTER", -260, 0)
     gmPanel:SetFrameStrata("HIGH")
     gmPanel:SetMovable(true)
@@ -676,6 +905,36 @@ local function BuildGMPanel()
         button:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
+    -- The lockpick sits apart from the palette above, and deliberately.
+    --
+    -- Those buttons lock the box you are standing at WITH that key. A pick cannot be a box's
+    -- key: it is cut for nothing, and a lock its own kind opens is not a lock. This one only
+    -- puts a pick in your pack, to see what one does to somebody else's box.
+    local pickRows = math.ceil(#KEYS / KEY_COLS)
+
+    local pick = CreateFrame("Button", "SanctuaryStashPick", gmPanel)
+    pick:SetWidth(28)
+    pick:SetHeight(28)
+    pick:SetPoint("TOPLEFT", keyLabel, "BOTTOMLEFT", 0, -12 - pickRows * 32)
+
+    local pickIcon = pick:CreateTexture(nil, "ARTWORK")
+    pickIcon:SetAllPoints()
+    pickIcon:SetTexture("Interface\\Icons\\INV_Misc_EngGizmos_SwissArmy")
+
+    local pickLabel = gmPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    pickLabel:SetPoint("LEFT", pick, "RIGHT", 8, 0)
+    pickLabel:SetText("Fragile Lockpick")
+
+    pick:SetScript("OnClick", function() SendServerCommand("stash pick") end)
+    pick:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Fragile Lockpick")
+        GameTooltip:AddLine("Puts one in your pack. It opens any strongbox once and breaks doing it, "
+            .. "and is only spent when nothing you carry fits the lock.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    pick:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     -- Upper row: the three harmless ones, left to right. 20 + 78 + 6 + 64 + 6 + 78 = 252,
     -- inside the 360 the panel is wide.
     local unlock = CreateFrame("Button", nil, gmPanel, "UIPanelButtonTemplate")
@@ -747,7 +1006,6 @@ listener:RegisterEvent("PLAYER_ENTERING_WORLD")
 listener:SetScript("OnEvent", function(self, event, arg1, arg2)
     if event == "PLAYER_ENTERING_WORLD" then
         playerName = UnitName("player")
-        BuildMinimapButton()
 
         -- Asked at login rather than when /stash is first typed, so the keystroke is not
         -- swallowed while the answer is still in flight.
@@ -767,4 +1025,196 @@ end)
 -- of a bag ends up calling - dragging, clicking, the keybind - so one hook covers them all.
 hooksecurefunc("PickupContainerItem", function(bag, slot)
     heldBag, heldSlot = bag, slot
+end)
+
+
+--------------------------------------------------------------------------
+-- Right-clicking a bag item puts it in the open box
+--------------------------------------------------------------------------
+
+--[[
+    The same gesture the bank, the mailbox and the trade window all use.
+
+    Picking an item up and dropping it on a slot still works and always will; this is the
+    shortcut for emptying a bag into a box, where doing it a drag at a time is tedious.
+
+    **Why this stands ON the bag buttons rather than in front of Blizzard's handler.**
+
+    The first version replaced ContainerFrameItemButton_OnClick and handed every click it
+    did not want back to the original, believing that kept the taint contained. It is the
+    opposite: a call made from addon code runs Blizzard's handler tainted, and the use
+    inside its right-click is protected - so every ordinary right-click on a bag became
+    "SanctuaryStash has been blocked from an action only available to the Blizzard UI".
+    Hooking afterwards is no better; by then the potion is drunk.
+
+    So Blizzard's handler is not touched at all. While a box is open, a transparent button
+    stands on each bag slot and owns the click. Right-click deposits. Left-click does what
+    Blizzard's does - PickupContainerItem, which is not protected - or, with a box item
+    held, swaps. With a modifier key down the catchers step aside entirely, so shift-split,
+    shift-link and ctrl-dress-up reach Blizzard's own button untainted. Close the box and
+    they are gone: nothing about the bags is different when no box is open.
+]]
+
+--- The first slot with nothing in it, numbered as the server numbers them, or nil if full.
+local function FirstEmptySlot()
+    for index = 1, #buttons do
+        local button = buttons[index]
+
+        -- Shown matters: buttons past the box's size are kept for reuse but hidden, and
+        -- depositing into one would name a slot the server does not believe exists.
+        if button:IsShown() and not button.entry then
+            return button:GetID()
+        end
+    end
+end
+
+-- bag button -> the catcher standing on it. Created once per button; plates and bag
+-- buttons alike are pooled by the client and reused forever.
+local catchers = {}
+
+local function BagSlotOf(catcher)
+    local bagButton = catcher:GetParent()
+    return bagButton:GetParent():GetID(), bagButton:GetID()
+end
+
+local function CatcherClicked(self, button)
+    -- Should have stepped aside before the click landed; if the key went down inside the
+    -- same tenth of a second, doing nothing beats doing the wrong thing.
+    if IsModifierKeyDown() then
+        return
+    end
+
+    local bag, slot = BagSlotOf(self)
+
+    --[[
+        A left click while the window is holding a strongbox item completes a swap.
+
+        This is the other half of clicking an item in the box: the bank lets you put what
+        you are carrying straight into a bag slot, exchanging it for whatever is there, and
+        this is the same gesture. It is one step on the server, so it needs no free bag
+        slot - the two items change places.
+
+        An empty bag slot is allowed and means "put it here", which is what the bank does.
+        A locked slot is one already in flight and is left alone.
+    ]]
+    if button ~= "RightButton" and HeldSlot() ~= nil and not CursorHasItem() then
+        local _, _, locked = GetContainerItemInfo(bag, slot)
+
+        if not locked then
+            local from = HeldSlot()
+            SetHeld(nil)
+
+            -- The server counts bag slots from one; the client's buttons count from one
+            -- too, so these go across as they are and ToCoreSlot does the translation.
+            Send(string.format("SWAP %d %d %d", from, bag, slot))
+        end
+
+        return
+    end
+
+    if button == "RightButton" and not CursorHasItem() then
+        local texture, _, locked = GetContainerItemInfo(bag, slot)
+
+        -- An empty slot, or one already in flight, is not ours to take - and with the box
+        -- open there is nothing else a right-click should do, so it does nothing.
+        if texture and not locked then
+            local target = FirstEmptySlot()
+
+            if not target then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffff4040The strongbox is full.|r")
+                return
+            end
+
+            -- The same message the drag route sends, so both ways in are one path on the
+            -- server and cannot come to disagree about the rules.
+            Send(string.format("PUT %d %d %d", bag, slot, target))
+        end
+
+        return
+    end
+
+    -- Everything else is what Blizzard's own unmodified click is: pick the item up, or
+    -- put down what the cursor holds. Not protected, so ours to call.
+    PickupContainerItem(bag, slot)
+end
+
+local function CatcherFor(bagButton)
+    local catcher = catchers[bagButton]
+
+    if catcher then
+        return catcher
+    end
+
+    -- A child of the bag button, so it is placed, shown and hidden with it and draws over
+    -- it. Being a child of a secure frame is fine; the parent's own scripts stay secure.
+    catcher = CreateFrame("Button", nil, bagButton)
+    catcher:SetAllPoints(bagButton)
+    catcher:SetFrameLevel(bagButton:GetFrameLevel() + 5)
+    catcher:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    catcher:RegisterForDrag("LeftButton")
+    catcher:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+
+    catcher:SetScript("OnClick", CatcherClicked)
+
+    -- Dragging out of a bag is a pickup too, and so is dropping the cursor onto one.
+    catcher:SetScript("OnDragStart", function(self) PickupContainerItem(BagSlotOf(self)) end)
+    catcher:SetScript("OnReceiveDrag", function(self) PickupContainerItem(BagSlotOf(self)) end)
+
+    -- The tooltip the bag button would have shown. Standing on it means standing in front
+    -- of its OnEnter as well.
+    catcher:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self:GetParent(), "ANCHOR_RIGHT")
+        GameTooltip:SetBagItem(BagSlotOf(self))
+        GameTooltip:Show()
+    end)
+    catcher:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    catcher:Hide()
+    catchers[bagButton] = catcher
+    return catcher
+end
+
+--[[
+    Puts a catcher on every visible bag slot while a box is open, and takes them all off
+    otherwise. Polled rather than hooked, because bags open and close on their own schedule
+    and a modifier key can go down at any moment - and a tenth of a second is well inside
+    the time it takes to press shift and then click.
+]]
+local function RefreshCatchers()
+    if not (frame and frame:IsShown()) or IsModifierKeyDown() then
+        for _, catcher in pairs(catchers) do
+            catcher:Hide()
+        end
+
+        return
+    end
+
+    for i = 1, (NUM_CONTAINER_FRAMES or 13) do
+        local bagFrame = _G["ContainerFrame" .. i]
+
+        if bagFrame and bagFrame:IsShown() and bagFrame.size then
+            for j = 1, bagFrame.size do
+                local bagButton = _G["ContainerFrame" .. i .. "Item" .. j]
+
+                if bagButton then
+                    CatcherFor(bagButton):Show()
+                end
+            end
+        end
+    end
+end
+
+-- Named so the harness can drive it: what it decides is entirely about timing.
+local bagWatcher = CreateFrame("Frame", "SanctuaryStashBagWatcher")
+local sinceBagScan = 0
+
+bagWatcher:SetScript("OnUpdate", function(self, elapsed)
+    sinceBagScan = sinceBagScan + (elapsed or 0)
+
+    if sinceBagScan < 0.1 then
+        return
+    end
+
+    sinceBagScan = 0
+    RefreshCatchers()
 end)

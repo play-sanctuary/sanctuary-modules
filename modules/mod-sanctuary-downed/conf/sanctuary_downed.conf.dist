@@ -2,7 +2,7 @@
 
 #
 #    SanctuaryDowned.Enable
-#        Description: Lifting a fallen player onto your shoulder and carrying them.
+#        Description: Carrying a fallen player on your shoulder.
 #        Default:     1
 #
 
@@ -32,11 +32,18 @@ SanctuaryDowned.Carry.SeatId = 0
 #
 #    SanctuaryDowned.Carry.Reach
 #        Description: How close you must be to lift somebody, in yards. Measured with
-#                     bounding radii, so this means "stood over them" rather than "nearby".
-#        Default:     0.5
+#                     bounding radii, so it is the ordinary reach everything else uses:
+#                     near enough to hit them is near enough to lift them.
+#
+#                     It was 0.5, meaning "stood over them", which read as the lift being
+#                     broken rather than as a rule - you were visibly beside somebody and
+#                     nothing happened. The cast is on the carrier rather than the target,
+#                     so there is no client-side range to keep in step with this: the
+#                     server check is the only gate there is.
+#        Default:     5.5
 #
 
-SanctuaryDowned.Carry.Reach = 0.5
+SanctuaryDowned.Carry.Reach = 5.5
 
 #
 #    SanctuaryDowned.Carry.SpeedFactor

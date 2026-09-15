@@ -31,6 +31,15 @@ namespace SanctuaryDowned
         Mounted,
         InVehicle,
         Busy,
+        // The core will not seat a passenger who is in combat when the vehicle is another
+        // player (Unit.cpp:15653), and it refuses in silence - the ride aura is applied,
+        // _EnterVehicle returns early, and the seat is simply never taken. Caught here so
+        // it reads as a rule with a reason rather than a lift that does nothing.
+        TargetInCombat,
+        // Told apart because they fail for opposite reasons: NoSeat is a configuration
+        // fault on this realm, SeatRefused is the core declining at the last moment.
+        NoSeat,
+        SeatRefused,
         Failed
     };
 

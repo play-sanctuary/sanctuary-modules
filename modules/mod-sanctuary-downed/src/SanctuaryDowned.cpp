@@ -28,6 +28,8 @@
 #include "SanctuaryDowned.h"
 
 #include "AllSpellScript.h"
+// Whoever is over your shoulder is named through the identity module or not at all.
+#include "SanctuaryIdentity.h"
 #include "Chat.h"
 #include "TemporarySummon.h"
 #include "Creature.h"
@@ -192,7 +194,7 @@ namespace
 
     std::unordered_map<ObjectGuid, DownedState> g_downed;
 
-    float g_reach = 0.5f;
+    float g_reach = 5.5f;
     float g_carrySpeed = 0.7f;
     bool g_announce = true;
 
@@ -216,6 +218,9 @@ namespace
 
     /// Looping animation held by the carrier. 428 is STATE_LOOT, whose pose is LootHold.
     uint32 g_carrierEmote = 428;
+
+    /// The addon channel the carrier's put-down button listens on.
+    std::string g_addonPrefix = "SDOWNED";
 
     /// carrier guid -> passenger guid, and the reverse, so either end resolves in one step.
     std::unordered_map<ObjectGuid, ObjectGuid> g_carrying;
@@ -331,6 +336,23 @@ namespace
 
     void TakeVehicleKit(Player* carrier)
     {
+        /*
+         * The ride aura comes off first, and it is on the CARRIER - cast by whoever is
+         * riding them, not worn by them.
+         *
+         * Unit::ExitVehicle is the usual way it goes, but that returns at its first line
+         * when m_vehicle is null, and removes the aura only afterwards. So a passenger
+         * whose aura landed and who was then never actually seated - _EnterVehicle still
+         * declines anyone in combat, after the aura has applied - leaves it behind with
+         * nothing that will ever take it off. Their client shows vehicle controls it
+         * cannot dismiss, and standing back up does not clear it, because being downed was
+         * never what was holding it.
+         *
+         * Doing it here covers every teardown path at once, and the unapply handler is
+         * what tells the passenger's client to put the controls away.
+         */
+        carrier->RemoveAurasByType(SPELL_AURA_CONTROL_VEHICLE);
+
         if (!carrier->GetVehicleKit())
             return;
 
@@ -356,6 +378,72 @@ namespace
             carrier->SetUInt32Value(UNIT_NPC_EMOTESTATE, carrying ? g_carrierEmote : 0);
     }
 
+    /*
+     * Puts a passenger into a carrier's seat.
+     *
+     * Deliberately not Unit::EnterVehicle, which is one line - CastCustomSpell(
+     * VEHICLE_SPELL_RIDE_HARDCODED, ..., TRIGGERED_IGNORE_CASTER_MOUNTED_OR_ON_VEHICLE) -
+     * whose cast is made by the PASSENGER with the carrier as its target. A downed player
+     * is stunned, silenced and pacified by GoDown, so CheckCasterAuras refused that cast
+     * every single time: the ride aura never applied, _EnterVehicle was never reached, and
+     * every caller saw only an empty seat with nothing to point at.
+     *
+     * Carrying somebody conscious worked throughout, which is what hid it for so long -
+     * the one case this module exists for was the only one that could not happen.
+     *
+     * TRIGGERED_IGNORE_CASTER_AURAS is the whole of the fix. Everything else is left as
+     * the core has it, including the refusal of a passenger who is in combat, which lives
+     * inside _EnterVehicle and is dealt with by the callers.
+     */
+    // Both ends are Unit rather than Player: the test grid seats dummy creatures on dummy
+    // creatures, and the ride spell has never cared which it is.
+    void SeatPassenger(Unit* passenger, Unit* carrier, int8 seatId)
+    {
+        if (!passenger || !carrier)
+            return;
+
+        passenger->CastCustomSpell(VEHICLE_SPELL_RIDE_HARDCODED, SPELLVALUE_BASE_POINT0, seatId + 1,
+            carrier, TriggerCastFlags(TRIGGERED_IGNORE_CASTER_MOUNTED_OR_ON_VEHICLE | TRIGGERED_IGNORE_CASTER_AURAS));
+    }
+
+    /*
+     * Tells a carrier's addon whether they are holding somebody, and who.
+     *
+     * The passenger needs none of this - they wear the Carried aura, and the addon reads
+     * that. A carrier wears nothing: they are the vehicle, not a passenger, and 3.3.5a
+     * gives the client no way to ask whether anything is riding it. So the one side that
+     * cannot work it out for itself is told.
+     */
+    void SendCarryState(Player* carrier)
+    {
+        if (!carrier || !carrier->GetSession())
+            return;
+
+        ObjectGuid const passenger = SanctuaryDowned::CarriedBy(carrier);
+
+        std::string body = "CARRY on=";
+        body += passenger.IsEmpty() ? "0" : "1";
+
+        if (!passenger.IsEmpty())
+            if (Player* held = ObjectAccessor::FindConnectedPlayer(passenger))
+                // LabelFor, never GetName: this string is shown to the carrier, and a
+                // stranger over your shoulder is still a stranger. Sending the real name
+                // and letting the addon decide would be no protection at all - the name
+                // would already be on their machine.
+                //
+                // Kept last in the payload deliberately. A stranger's label is their race,
+                // so it can contain a space ("Night Elf") and must be free to run to the
+                // end of the line.
+                body += " name=" + SanctuaryIdentity::LabelFor(carrier, held);
+
+        // 3.3.5a carries addon traffic as "PREFIX\tBODY" inside a whisper to self.
+        std::string const message = g_addonPrefix + "\t" + body;
+
+        WorldPacket data;
+        ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_ADDON, carrier, carrier, message);
+        carrier->GetSession()->SendPacket(&data);
+    }
+
     void Forget(ObjectGuid carrier, ObjectGuid passenger)
     {
         g_carrying.erase(carrier);
@@ -366,6 +454,11 @@ namespace
         if (g_carriedSpell)
             if (Player* body = ObjectAccessor::FindConnectedPlayer(passenger))
                 body->RemoveAurasDueToSpell(g_carriedSpell);
+
+        // Erased above, so this reports "not carrying" - which is the point. Every ending
+        // runs through here, so the button goes away however the carry finished.
+        if (Player* holder = ObjectAccessor::FindConnectedPlayer(carrier))
+            SendCarryState(holder);
     }
 
     /// Everything that must be true both when the cast starts and when it lands.
@@ -406,6 +499,19 @@ namespace
         // is a real conflict rather than a rule, so it holds for GMs too.
         if (carrier->GetVehicle() || target->GetVehicle())
             return Result::InVehicle;
+
+        /*
+         * The core refuses to seat a passenger who is in combat when the vehicle is
+         * another player (Unit.cpp:15653), and it refuses in silence: the ride aura
+         * applies, _EnterVehicle returns at the top, and the lift reports a bare failure.
+         *
+         * Somebody unconscious is the opposite case and must not be caught by this - they
+         * are out of the fight by definition, and being unable to carry a body because
+         * whatever felled it is still swinging would make rescue impossible exactly when
+         * it matters. PickUp drops what remains of their combat instead.
+         */
+        if (target->IsInCombat() && !SanctuaryDowned::IsDowned(target))
+            return Result::TargetInCombat;
 
         // Deliberately tight, and measured with bounding radii, so it means "stood over
         // them" rather than "somewhere nearby".
@@ -471,9 +577,28 @@ namespace SanctuaryDowned
         uint32 const vehicleId = VehicleForPassenger(carrier, target);
 
         if (!GiveVehicleKit(carrier, vehicleId))
-            return Result::Failed;
+        {
+            LOG_ERROR("module.sanctuarydowned",
+                "Carry: no vehicle {} for carrier race {} sex {} carrying race {} sex {}. "
+                "The client patch and vehicle_dbc are out of step.",
+                vehicleId, carrier->getRace(), uint32(carrier->getGender()),
+                target->getRace(), uint32(target->getGender()));
 
-        target->EnterVehicle(carrier, g_seatId);
+            return Result::NoSeat;
+        }
+
+        /*
+         * A body still flagged in combat is refused by the core without a word
+         * (Unit.cpp:15653). GoDown already stops their combat, but whatever felled them
+         * goes on swinging and puts them straight back into it, so the flag is almost
+         * always back by the time somebody reaches them. Clearing it here is what makes
+         * a rescue under fire possible at all; Check refuses anybody who is NOT downed,
+         * so this cannot be used to lift someone out of a fight they are still in.
+         */
+        if (target->IsInCombat() && SanctuaryDowned::IsDowned(target))
+            target->CombatStop(true);
+
+        SeatPassenger(target, carrier, g_seatId);
 
         // EnterVehicle works through a spell, so the seat is not guaranteed to be taken by
         // the time it returns. Checking rather than assuming means a failure is reported as
@@ -481,13 +606,28 @@ namespace SanctuaryDowned
         if (target->GetVehicle() != carrier->GetVehicleKit())
         {
             TakeVehicleKit(carrier);
-            return Result::Failed;
+
+            // Everything known about why, because the core declines silently and this is
+            // the only place the state is still intact to look at.
+            LOG_ERROR("module.sanctuarydowned",
+                "Carry: {} would not take seat {} of vehicle {} on {} - "
+                "alive {}, in combat {}, downed {}, immune-to-PC {}, rooted {}, on transport {}.",
+                target->GetName(), g_seatId, vehicleId, carrier->GetName(),
+                target->IsAlive(), target->IsInCombat(), SanctuaryDowned::IsDowned(target),
+                target->HasUnitFlag(UNIT_FLAG_IMMUNE_TO_PC),
+                target->HasUnitState(UNIT_STATE_ROOT),
+                target->GetTransport() != nullptr);
+
+            return Result::SeatRefused;
         }
 
         g_carrying[carrier->GetGUID()] = target->GetGUID();
         g_carriedBy[target->GetGUID()] = carrier->GetGUID();
 
         SetCarryPose(carrier, true);
+
+        // After the maps are written, so it reports the carry that just happened.
+        SendCarryState(carrier);
 
         if (g_carriedSpell)
             target->AddAura(g_carriedSpell, target);
@@ -653,7 +793,7 @@ namespace SanctuaryDowned
                 continue;
             }
 
-            passenger->EnterVehicle(carrier, g_seatId);
+            SeatPassenger(passenger, carrier, g_seatId);
 
             if (passenger->GetVehicle() == carrier->GetVehicleKit())
             {
@@ -768,7 +908,7 @@ namespace SanctuaryDowned
             return false;
         }
 
-        passenger->EnterVehicle(carrier, g_seatId);
+        SeatPassenger(passenger, carrier, g_seatId);
 
         if (passenger->GetVehicle() != carrier->GetVehicleKit())
         {
@@ -808,6 +948,9 @@ namespace SanctuaryDowned
             case Result::Busy:             return "You are already casting something.";
             case Result::Mounted:          return "Not while mounted.";
             case Result::InVehicle:        return "One of you is already in a vehicle.";
+            case Result::TargetInCombat:   return "They are still in the fight. It has to break first.";
+            case Result::NoSeat:           return "There is no carry seat for that body on this realm.";
+            case Result::SeatRefused:      return "They would not settle onto your shoulder.";
             default:                       return "That did not work.";
         }
     }
@@ -1445,10 +1588,22 @@ public:
         // the target to be picked up by somebody else, or for either to die.
         Player* target = ObjectAccessor::FindConnectedPlayer(targetGuid);
 
-        if (SanctuaryDowned::PickUp(carrier, target) != SanctuaryDowned::Result::Ok)
+        /*
+         * Say which check refused, not merely that one did.
+         *
+         * This said "You cannot lift them." for every reason there is - too far, mounted,
+         * already carrying, someone else has them - after a five second cast. Explain has
+         * the actual sentence and was being thrown away, so the player was told the same
+         * unhelpful thing whether they needed to step closer or dismount.
+         */
+        SanctuaryDowned::Result const result = SanctuaryDowned::PickUp(carrier, target);
+
+        if (result != SanctuaryDowned::Result::Ok && carrier->GetSession())
         {
-            if (carrier->GetSession())
-                ChatHandler(carrier->GetSession()).PSendSysMessage("You cannot lift them.");
+            char const* why = SanctuaryDowned::Explain(result);
+            // "{}", not "%s": PSendSysMessage formats with fmt, so a printf placeholder is
+            // printed as itself and the player is told "%s".
+            ChatHandler(carrier->GetSession()).PSendSysMessage("{}", why ? why : "You cannot lift them.");
         }
     }
 };
@@ -1457,6 +1612,33 @@ class sanctuary_downed_playerscript : public PlayerScript
 {
 public:
     sanctuary_downed_playerscript() : PlayerScript("sanctuary_downed_playerscript") { }
+
+    /*
+     * Addon traffic arrives as a whisper the player sends to themselves.
+     *
+     * The carry state is pushed when it changes, but a push is missed by anyone who
+     * /reloads or who is still on the loading screen when it goes out - and a carrier
+     * whose button has vanished has no way to put the body down. So the addon asks, and
+     * this answers.
+     */
+    bool OnPlayerCanUseChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg,
+        Player* /*receiver*/) override
+    {
+        if (lang != LANG_ADDON || !player || !g_enabled)
+            return true;
+
+        std::string const marker = g_addonPrefix + "\t";
+
+        // Every registered PlayerScript sees this message and the first false swallows it,
+        // so anything that is not ours has to be passed along untouched.
+        if (msg.rfind(marker, 0) != 0)
+            return true;
+
+        if (msg.compare(marker.size(), 4, "SYNC") == 0)
+            SendCarryState(player);
+
+        return false;
+    }
 
     void OnPlayerLogout(Player* player) override
     {
@@ -1590,7 +1772,7 @@ public:
 
         g_vehicleId = sConfigMgr->GetOption<uint32>("SanctuaryDowned.Carry.VehicleId", 284);
         g_seatId = int8(sConfigMgr->GetOption<int32>("SanctuaryDowned.Carry.SeatId", 0));
-        g_reach = sConfigMgr->GetOption<float>("SanctuaryDowned.Carry.Reach", 0.5f);
+        g_reach = sConfigMgr->GetOption<float>("SanctuaryDowned.Carry.Reach", 5.5f);
         g_carrySpeed = sConfigMgr->GetOption<float>("SanctuaryDowned.Carry.SpeedFactor", 0.7f);
         g_announce = sConfigMgr->GetOption<bool>("SanctuaryDowned.Announce", true);
 
@@ -1908,7 +2090,7 @@ namespace SanctuaryDowned
                 if (!body)
                     continue;
 
-                body->EnterVehicle(carrier, 0);
+                SeatPassenger(body, carrier, 0);
 
                 // A creature does not take the seat's ride animation the way a player does,
                 // so without this every body in the grid stands to attention on the
