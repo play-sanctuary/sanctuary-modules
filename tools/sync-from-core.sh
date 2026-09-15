@@ -63,11 +63,19 @@ fi
 # What is about to change
 # ---------------------------------------------------------------------------
 
-# `Only in $CORE/modules/` lines are upstream AzerothCore's own files — CMakeLists.txt,
+# `Only in $CORE/modules/: X` lines are upstream AzerothCore's own files — CMakeLists.txt,
 # ModulesPCH.h, create_module.sh and friends. They are deliberately not republished
-# here, so they are filtered out rather than treated as drift.
-DRIFT="$(diff -rq --strip-trailing-cr "$CORE/modules/" "$REPO/modules/" 2>/dev/null \
-         | grep -v "^Only in $CORE/modules/: " || true)"
+# here, so they are filtered out rather than treated as drift — unless X is a mod-*
+# folder, which is a new module and exactly the drift this exists to catch. The first
+# version filtered every such line, so a new module never registered at all.
+#
+# A module cloned from its own repository carries a .git, excluded here and in the copy
+# below: git would otherwise stage the folder as an embedded repository — a bare pointer
+# with none of the module's files in it, published as if it were the source.
+DRIFT="$(diff -rq --strip-trailing-cr -x .git "$CORE/modules/" "$REPO/modules/" 2>/dev/null \
+         | awk -v top="Only in $CORE/modules/: " \
+               'index($0, top) == 1 && substr($0, length(top) + 1, 4) != "mod-" { next } { print }' \
+         || true)"
 
 if [ -z "$DRIFT" ]; then
     say "In sync — the published modules match the working tree."
@@ -90,7 +98,10 @@ fi
 # leave it behind and quietly republish something that no longer exists.
 say "Syncing modules/"
 rm -rf "${REPO:?}/modules"/mod-*
-( cd "$CORE/modules" && for d in mod-*/; do cp -r "$d" "$REPO/modules/"; done )
+( cd "$CORE/modules" && for d in mod-*/; do
+      cp -r "$d" "$REPO/modules/"
+      rm -rf "$REPO/modules/${d%/}/.git"
+  done )
 
 git -C "$REPO" add -A modules
 
