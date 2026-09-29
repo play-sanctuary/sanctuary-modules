@@ -189,11 +189,11 @@ local function SavedLawmanAngle()
     if SanctuaryLawmanDB and SanctuaryLawmanDB.buttonAngle then
         return SanctuaryLawmanDB.buttonAngle
     end
-    -- The arc the other Sanctuary buttons sit in: outlaw -113.04, lawman -132.01, disguise -151.64, profile -171.25,
-    -- roughly 19 degrees apart. This one took the place the strongbox key used to hold,
-    -- which is why the arc has no gap in it. Drag it if it lands somewhere awkward; the
-    -- angle is remembered.
-    return -132.01
+    -- Not on the arc the other Sanctuary buttons share (faction -113.41, disguise -132.51,
+    -- outlaw -152.22, profile -171.25): this one sits by itself above and to the left, where
+    -- NotPlater's button used to be. Drag it if it lands somewhere awkward; the angle is
+    -- remembered.
+    return 147.66
 end
 
 local function DragLawmanButton(self)

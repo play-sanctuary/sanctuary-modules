@@ -2,6 +2,6 @@
 ## Title: Sanctuary GM
 ## Notes: Game master panel: spawn, morph, sounds and object placement.
 ## Author: Sanctuary
-## Version: 2.0
+## Version: 2.2
 
 SanctuaryGM.lua

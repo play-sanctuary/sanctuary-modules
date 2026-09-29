@@ -14,57 +14,8 @@
     /gm to open.
 ]]
 
---[[
-    The Timekeeper, the game masters' class (SanctuaryGmClass.cpp).
-
-    The client learns the class itself from the patch, but the interface's tables of class
-    colours and icons were written for ten classes, and stock frames index them without
-    looking - the battleground scoreboard among them. Registered here, at load, because
-    this addon runs for everybody and anybody may meet a game master. The token must match
-    GM_CLASS_TOKEN in tools/assets/make-patch.py; the icon is the Paladin's, which the
-    class row was cloned from.
-]]
-RAID_CLASS_COLORS.TIMEKEEPER = RAID_CLASS_COLORS.TIMEKEEPER or { r = 0.0, g = 1.0, b = 0.59 }
-CLASS_ICON_TCOORDS.TIMEKEEPER = CLASS_ICON_TCOORDS.TIMEKEEPER or { 0, 0.25, 0.5, 0.75 }
-
---[[
-    Talents and glyphs, for a class that has neither.
-
-    Blizzard's talent frame assumes the player's class has talent trees. A Timekeeper has
-    none, so the frame errors while opening - and then its hotkey no longer closes it,
-    because the error happens before the toggle reaches HideUIPanel. The window is left
-    stuck until its X is clicked.
-
-    So the frame is not opened at all. The test is the trees, not the class: any class with
-    no talent trees gets the same answer, and if Timekeepers are ever given trees these
-    stop refusing on their own. Glyphs go with them - they are a tab of the same frame and
-    are chosen against talents.
-]]
-local function SanctuaryNoTalentTrees()
-    return (GetNumTalentTabs() or 0) == 0
-end
-
-local function SanctuaryRefuseTalents(what)
-    DEFAULT_CHAT_FRAME:AddMessage("|cffd8b46aSanctuary:|r your class has no " .. what .. ".")
-end
-
-local SanctuaryToggleTalentFrame = ToggleTalentFrame
-ToggleTalentFrame = function(...)
-    if SanctuaryNoTalentTrees() then return SanctuaryRefuseTalents("talents") end
-    return SanctuaryToggleTalentFrame(...)
-end
-
-local SanctuaryToggleGlyphFrame = ToggleGlyphFrame
-ToggleGlyphFrame = function(...)
-    if SanctuaryNoTalentTrees() then return SanctuaryRefuseTalents("glyphs") end
-    return SanctuaryToggleGlyphFrame(...)
-end
-
-local SanctuaryOpenGlyphFrame = OpenGlyphFrame
-OpenGlyphFrame = function(...)
-    if SanctuaryNoTalentTrees() then return SanctuaryRefuseTalents("glyphs") end
-    return SanctuaryOpenGlyphFrame(...)
-end
+-- The Timekeeper class-colour/icon registrations and the talent/glyph refusals that went with
+-- it were removed on 2026-09-16 along with the class itself.
 
 local ADDON_PREFIX = "SGM"
 

@@ -6,10 +6,10 @@
 -- and registered as NotPlater's defaults for the session.
 
 SanctuaryVoiceNotPlaterProfile = {
-    version = 7,
+    version = 8,
     name = "Sanctuary",
     -- NotPlater's minimap button, in degrees round the minimap (LibDBIcon's minimapPos).
-    minimapPos = 147.2032,
+    minimapPos = 345.3699,
     data = {
         ["buffs"] = {
             ["auraFrame1"] = {

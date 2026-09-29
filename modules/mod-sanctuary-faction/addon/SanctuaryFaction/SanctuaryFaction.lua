@@ -842,10 +842,10 @@ end
 --------------------------------------------------------------------------
 
 local MINIMAP_RADIUS = 80
--- Measured off a live minimap, not guessed. The other Sanctuary buttons share one arc,
--- about 19 degrees apart: outlaw -113.04, lawman -132.01, disguise -151.64, profile -171.25. This one is
--- deliberately not on it - it sits clear of the rest, above the minimap.
-local DEFAULT_ANGLE = -17.59
+-- Measured off a live minimap, not guessed. The Sanctuary buttons share one arc, about 19
+-- degrees apart: faction -113.41, disguise -132.51, outlaw -152.22, profile -171.25. Lawman is
+-- not on it - it sits by itself at 147.66 - and NotPlater's button is at 345.37.
+local DEFAULT_ANGLE = -113.41
 
 local minimapButton = CreateFrame("Button", "SanctuaryFactionMinimapButton", Minimap)
 minimapButton:SetWidth(31)
