@@ -30,7 +30,7 @@ game data, client files or artwork is contained in this repository.
 
 ## What is in here
 
-Sixteen AzerothCore modules, fifteen of them written for Sanctuary. Each is a
+Seventeen AzerothCore modules, sixteen of them written for Sanctuary. Each is a
 self-contained directory in the layout AzerothCore expects — `src/` for C++, `data/sql/`
 for database migrations, `conf/` for a config template, and `addon/` where the module
 ships a client-side Lua addon of its own.
@@ -62,6 +62,7 @@ ships a client-side Lua addon of its own.
 | `mod-sanctuary-stash` | Strongboxes: shared containers standing in the world, each opened by whoever carries its key. A thieves' cache, the watch's evidence locker, a merchant's lockup. The guild bank cannot be borrowed for this. |
 | `mod-sanctuary-zidormi` | Zidormi of the bronze flight, outside the Ruins of Lordaeron, moving players between two readings of the same ground — the memory of the past, and the present day — by phase mask. |
 | `mod-sanctuary-minimap` | Tracks several kinds of place on the minimap at once — mailbox, banker, trainer — where the 3.3.5a client allows only one. The client gives an addon no world position at all, so the server sends each pin as an offset in yards from the player and the addon draws it. |
+| `mod-sanctuary-collision` | Players bump into one another, which the 3.3.5a client never does on its own. Someone standing still is solid: everyone near them is sent an invisible person-sized box — Blizzard's own collision model, built by hand for each viewer and never added to the map. Two people who meet while moving glide past each other in a short server-driven move with no knockback in it. No client patch. |
 
 ### Voice and administration
 

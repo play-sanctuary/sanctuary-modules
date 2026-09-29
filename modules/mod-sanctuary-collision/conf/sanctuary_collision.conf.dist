@@ -1,0 +1,186 @@
+[worldserver]
+
+#
+#    SanctuaryCollision.Enable
+#        Description: Players bump into one another. Off, everyone walks through everyone
+#                     again, exactly as the stock client does.
+#        Default:     1
+#
+
+SanctuaryCollision.Enable = 1
+
+#
+#    SanctuaryCollision.Debug
+#        Description: Log to the server log, at info level and stamped with the server's
+#                     milliseconds, every standing player's box sent to or withdrawn from
+#                     someone (to whom, where, how far apart), every box someone walked
+#                     through, and every bump and glide. Noisy - for diagnosing only. The
+#                     .collision probe and .collision glide commands (game masters) work
+#                     either way.
+#        Default:     0
+#
+
+SanctuaryCollision.Debug = 0
+
+#
+#    SanctuaryCollision.CheckIntervalMs
+#        Description: How often each player is checked, in milliseconds. A runner covers
+#                     about a third of a yard in 50 ms, so a swerve can land up to that much
+#                     later than the contact, and someone who stops is solid up to that much
+#                     later. Lower is tighter and costs more; below 10 is not allowed.
+#        Default:     50
+#
+
+SanctuaryCollision.CheckIntervalMs = 50
+
+#
+#    SanctuaryCollision.DisabledAreas
+#        Description: Zone or area ids, comma separated, where nobody collides - a crowded
+#                     bank, an auction house, a doorway people keep blocking. A zone id
+#                     covers every area inside it.
+#        Example:     "1519,1637"      (Stormwind City, Orgrimmar)
+#        Default:     ""
+#
+
+SanctuaryCollision.DisabledAreas = ""
+
+#
+#    SanctuaryCollision.Block.Enable
+#        Description: A player who stands still is solid. Every player within ten yards is
+#                     sent an invisible, person-sized box where they stand, and their clients
+#                     collide with it properly - smoothly, like terrain. Each gets a copy of
+#                     their own, turned to face them, and only once they are clear of it, so
+#                     it never lands on top of anyone. It is taken back the moment the player
+#                     moves.
+#        Default:     1
+#
+
+SanctuaryCollision.Block.Enable = 1
+
+#
+#    SanctuaryCollision.Block.IdleMs
+#        Description: How long a player must stand still, in milliseconds, before they
+#                     become solid. At 0 it is at once - though the client itself takes a few
+#                     tenths of a second to make a freshly sent box solid.
+#        Default:     0
+#
+
+SanctuaryCollision.Block.IdleMs = 0
+
+#
+#    SanctuaryCollision.Block.SolidMs
+#        Description: How long after a box is sent before it is relied on to stop someone,
+#                     in milliseconds. A client takes a moment to make a freshly sent box
+#                     solid; until then, someone walking into that player is swerved round
+#                     them instead. Too low, and people can walk through someone who has just
+#                     stopped; too high, and they are swerved where they could have been
+#                     stopped. Anyone found to have walked through a box is swerved whatever
+#                     this says. At most 5000.
+#        Default:     1000
+#
+
+SanctuaryCollision.Block.SolidMs = 1000
+
+#
+#    SanctuaryCollision.Block.Scale
+#        Description: Size of the box. At 1 it is Blizzard's "Collision PC Size" model as
+#                     shipped, about 1.25 x 1.5 yards across and 3.2 tall. It is further
+#                     multiplied by the player's own scale.
+#        Default:     1.0
+#
+
+SanctuaryCollision.Block.Scale = 1.0
+
+#
+#    SanctuaryCollision.Block.Entry
+#        Description: The gameobject_template the box is built from. Only change this
+#                     together with the module's world SQL.
+#        Default:     990300
+#
+
+SanctuaryCollision.Block.Entry = 990300
+
+#
+#    SanctuaryCollision.Bump.Enable
+#        Description: Two players who meet while at least one of them is moving collide.
+#                     Only a player who is moving is ever moved; someone standing still is
+#                     never pushed about.
+#        Default:     1
+#
+
+SanctuaryCollision.Bump.Enable = 1
+
+#
+#    SanctuaryCollision.Bump.Style
+#        Description: What happens when a moving player meets someone.
+#                     glide  - they brush past: each moving player keeps going at their own
+#                              pace and steps just far enough aside to clear the other, in a
+#                              short move the server drives (the way Charge moves a player) -
+#                              no hop, no falling. Head on, both keep right. The way is
+#                              checked for walls, ledges and water first; where there is no
+#                              room to glide, the slide below is used instead.
+#                     slide  - the same swerve done with a very low knockback: a brief hop.
+#                     bounce - each moving player is knocked back the way they came.
+#                     A moving player cannot be given a solid box of their own on this
+#                     client - see the module README for why.
+#        Default:     glide
+#
+
+SanctuaryCollision.Bump.Style = glide
+
+#
+#    SanctuaryCollision.Glide.Ms
+#        Description: Bump.Style = glide only. How long a glide takes, in milliseconds. The
+#                     player cannot steer while it lasts. Shorter is snappier; longer is
+#                     smoother. 80 to 250.
+#        Default:     150
+#
+
+SanctuaryCollision.Glide.Ms = 150
+
+#
+#    SanctuaryCollision.Slide.Hop
+#        Description: Bump.Style = slide, and a glide's fallback. How high the knockback
+#                     swerve lifts a player, as a vertical speed in yards per second: at 0.7
+#                     it is off the ground for about 70 milliseconds and about a centimetre
+#                     high. Lower is subtler but sharper, since the same swerve has to happen
+#                     in less time; higher is smoother but starts to look like a hop. 0.3 to
+#                     5.0.
+#        Default:     0.7
+#
+
+SanctuaryCollision.Slide.Hop = 0.7
+
+#
+#    SanctuaryCollision.Bump.SpeedXY
+#    SanctuaryCollision.Bump.SpeedZ
+#        Description: Bump.Style = bounce only. The shove, as a knockback: horizontal and
+#                     vertical speed in yards per second. The defaults are a small stumble
+#                     back of about half a yard. For a "stopped dead" feel rather than a
+#                     bounce, lower both - around 1.0 and 0.5.
+#        Default:     3.0
+#                     1.5
+#
+
+SanctuaryCollision.Bump.SpeedXY = 3.0
+SanctuaryCollision.Bump.SpeedZ = 1.5
+
+#
+#    SanctuaryCollision.Bump.CooldownMs
+#        Description: After a swerve or bounce, how long before either player can be moved
+#                     again, in milliseconds. Someone who keeps steering into another person
+#                     is moved at most this often.
+#        Default:     600
+#
+
+SanctuaryCollision.Bump.CooldownMs = 600
+
+#
+#    SanctuaryCollision.Bump.RadiusScale
+#        Description: Multiplies each player's radius for swerving. At 1, two ordinary-sized
+#                     characters meet when their centres are about 0.8 yards apart. The
+#                     standing box is not affected - it is the size it is.
+#        Default:     1.0
+#
+
+SanctuaryCollision.Bump.RadiusScale = 1.0
